@@ -1,0 +1,41 @@
+services:
+  oversight-registry:
+    build: .
+    image: oversight-registry:0.1.0
+    container_name: oversight-registry
+    restart: unless-stopped
+    ports:
+      # bind to loopback only by default — put a reverse proxy (Caddy/nginx/Traefik)
+      # in front to terminate TLS and reach the public beacon domain
+      - "127.0.0.1:8765:8765"
+    volumes:
+      - oversight_data:/data
+    environment:
+      OVERSIGHT_DB: /data/oversight-registry.sqlite
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8765/health').read()"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+  # Optional: Caddy TLS terminator + beacon domain fronting.
+  # Uncomment once you have a real domain + DNS pointing at this host.
+  #
+  # caddy:
+  #   image: caddy:2-alpine
+  #   container_name: oversight-caddy
+  #   restart: unless-stopped
+  #   ports:
+  #     - "80:80"
+  #     - "443:443"
+  #   volumes:
+  #     - ./Caddyfile:/etc/caddy/Caddyfile:ro
+  #     - caddy_data:/data
+  #     - caddy_config:/config
+  #   depends_on:
+  #     - oversight-registry
+
+volumes:
+  oversight_data:
+  # caddy_data:
+  # caddy_config:

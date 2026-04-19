@@ -1,0 +1,12 @@
+[package]
+name = "oversight-semantic"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "L3 semantic watermarking for Oversight — airgap-strip-survivor synonym rotation"
+
+[dependencies]
+regex = "1"
+once_cell = "1"
+sha2.workspace = true

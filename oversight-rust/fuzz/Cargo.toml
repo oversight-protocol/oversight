@@ -1,0 +1,27 @@
+[package]
+name = "oversight-fuzz"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+oversight-container = { path = "../oversight-container" }
+oversight-manifest = { path = "../oversight-manifest" }
+
+[[bin]]
+name = "container_parser"
+path = "fuzz_targets/container_parser.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "manifest_parser"
+path = "fuzz_targets/manifest_parser.rs"
+test = false
+doc = false
+bench = false

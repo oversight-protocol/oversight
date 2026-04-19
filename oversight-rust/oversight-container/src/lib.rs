@@ -1,0 +1,487 @@
+//! # oversight-container
+//!
+//! The `.sealed` container format: binary layout with magic bytes, signed
+//! manifest, AEAD-encrypted payload, and DEK-wrapped-for-recipient.
+//!
+//! Binary layout:
+//! ```text
+//! offset  length    field
+//! ------  --------  ---------------------------------------
+//! 0       6         magic: b"OSGT\x01\x00"
+//! 6       1         format_version (=1)
+//! 7       1         suite_id (1=CLASSIC_V1, 2=HYBRID_V1)
+//! 8       4         manifest_len (u32 BE)
+//! 12      M         manifest (canonical JSON, signed)
+//! 12+M    4         wrapped_dek_len (u32 BE)
+//! ...     W         wrapped_dek (JSON)
+//! ...     24        aead_nonce
+//! ...     4         ciphertext_len (u32 BE)
+//! ...     C         ciphertext (XChaCha20-Poly1305(plaintext))
+//! ```
+
+use oversight_crypto::{self as crypto, CryptoError, WrappedDek};
+use oversight_manifest::{Manifest, ManifestError};
+use thiserror::Error;
+
+pub const MAGIC: [u8; 6] = *b"OSGT\x01\x00";
+pub const SUITE_CLASSIC_V1_ID: u8 = 1;
+pub const SUITE_HYBRID_V1_ID: u8 = 2;
+
+// Hard caps to prevent DoS via attacker-controlled length fields.
+pub const MAX_MANIFEST_BYTES: usize = 4 * 1024 * 1024;
+pub const MAX_WRAPPED_DEK_BYTES: usize = 1 * 1024 * 1024;
+pub const MAX_CIPHERTEXT_BYTES: usize = 4 * 1024 * 1024 * 1024;
+
+#[derive(Debug, Error)]
+pub enum ContainerError {
+    #[error("bad magic: expected {:?}, got {got:?}", MAGIC)]
+    BadMagic { got: Vec<u8> },
+    #[error("unsupported format version: {0}")]
+    UnsupportedVersion(u8),
+    #[error("truncated file: wanted {wanted} bytes for {field}, got {got}")]
+    Truncated {
+        wanted: usize,
+        got: usize,
+        field: &'static str,
+    },
+    #[error("oversized field {field}: {got} > {max}")]
+    Oversized {
+        field: &'static str,
+        got: usize,
+        max: usize,
+    },
+    #[error(transparent)]
+    Manifest(#[from] ManifestError),
+    #[error(transparent)]
+    Crypto(#[from] CryptoError),
+    #[error("json: {0}")]
+    Json(#[from] serde_json::Error),
+    #[error("invalid utf-8: {0}")]
+    Utf8(#[from] std::string::FromUtf8Error),
+    #[error("precondition failed: {0}")]
+    Precondition(&'static str),
+    #[error("no decryptable slot found (tried {slots} slots)")]
+    NoDecryptableSlot { slots: usize },
+    #[error("plaintext hash mismatch — manifest and plaintext disagree")]
+    HashMismatch,
+}
+
+#[derive(Debug)]
+pub struct SealedFile {
+    pub manifest: Manifest,
+    pub wrapped_dek: serde_json::Value,
+    pub aead_nonce: [u8; 24],
+    pub ciphertext: Vec<u8>,
+    pub suite_id: u8,
+}
+
+fn read_exact<'a>(buf: &'a [u8], at: &mut usize, n: usize, field: &'static str) -> Result<&'a [u8], ContainerError> {
+    if buf.len() < *at + n {
+        return Err(ContainerError::Truncated {
+            wanted: n,
+            got: buf.len().saturating_sub(*at),
+            field,
+        });
+    }
+    let slice = &buf[*at..*at + n];
+    *at += n;
+    Ok(slice)
+}
+
+fn read_u32_be(buf: &[u8], at: &mut usize, field: &'static str) -> Result<u32, ContainerError> {
+    let slice = read_exact(buf, at, 4, field)?;
+    Ok(u32::from_be_bytes([slice[0], slice[1], slice[2], slice[3]]))
+}
+
+impl SealedFile {
+    pub fn to_bytes(&self) -> Result<Vec<u8>, ContainerError> {
+        let mut out = Vec::new();
+        out.extend_from_slice(&MAGIC);
+        out.push(1);
+        out.push(self.suite_id);
+
+        let manifest_json = self.manifest.to_json()?;
+        out.extend_from_slice(&(manifest_json.len() as u32).to_be_bytes());
+        out.extend_from_slice(&manifest_json);
+
+        let wrapped_bytes = serde_json::to_vec(&self.wrapped_dek)?;
+        out.extend_from_slice(&(wrapped_bytes.len() as u32).to_be_bytes());
+        out.extend_from_slice(&wrapped_bytes);
+
+        out.extend_from_slice(&self.aead_nonce);
+        out.extend_from_slice(&(self.ciphertext.len() as u32).to_be_bytes());
+        out.extend_from_slice(&self.ciphertext);
+
+        Ok(out)
+    }
+
+    pub fn from_bytes(data: &[u8]) -> Result<Self, ContainerError> {
+        let mut at = 0usize;
+        let magic = read_exact(data, &mut at, 6, "magic")?;
+        if magic != MAGIC {
+            return Err(ContainerError::BadMagic { got: magic.to_vec() });
+        }
+        let hdr = read_exact(data, &mut at, 2, "version/suite")?;
+        let fmt_ver = hdr[0];
+        let suite_id = hdr[1];
+        if fmt_ver != 1 {
+            return Err(ContainerError::UnsupportedVersion(fmt_ver));
+        }
+
+        let mlen = read_u32_be(data, &mut at, "manifest_len")? as usize;
+        if mlen > MAX_MANIFEST_BYTES {
+            return Err(ContainerError::Oversized {
+                field: "manifest",
+                got: mlen,
+                max: MAX_MANIFEST_BYTES,
+            });
+        }
+        let manifest_bytes = read_exact(data, &mut at, mlen, "manifest")?;
+        let manifest = Manifest::from_json(manifest_bytes)?;
+
+        let wlen = read_u32_be(data, &mut at, "wrapped_dek_len")? as usize;
+        if wlen > MAX_WRAPPED_DEK_BYTES {
+            return Err(ContainerError::Oversized {
+                field: "wrapped_dek",
+                got: wlen,
+                max: MAX_WRAPPED_DEK_BYTES,
+            });
+        }
+        let wrapped_bytes = read_exact(data, &mut at, wlen, "wrapped_dek")?;
+        let wrapped_dek: serde_json::Value = serde_json::from_slice(wrapped_bytes)?;
+
+        let nonce_slice = read_exact(data, &mut at, 24, "aead_nonce")?;
+        let mut aead_nonce = [0u8; 24];
+        aead_nonce.copy_from_slice(nonce_slice);
+
+        let clen = read_u32_be(data, &mut at, "ciphertext_len")? as usize;
+        if clen > MAX_CIPHERTEXT_BYTES {
+            return Err(ContainerError::Oversized {
+                field: "ciphertext",
+                got: clen,
+                max: MAX_CIPHERTEXT_BYTES,
+            });
+        }
+        let ciphertext = read_exact(data, &mut at, clen, "ciphertext")?.to_vec();
+
+        Ok(SealedFile {
+            manifest,
+            wrapped_dek,
+            aead_nonce,
+            ciphertext,
+            suite_id,
+        })
+    }
+}
+
+// -------------------------- High-level API --------------------------
+
+/// Seal plaintext for a single recipient.
+pub fn seal(
+    plaintext: &[u8],
+    manifest: &mut Manifest,
+    issuer_ed25519_priv: &[u8],
+    recipient_x25519_pub: &[u8],
+) -> Result<Vec<u8>, ContainerError> {
+    // Preconditions as explicit checks (not asserts — python -O safety parity).
+    if manifest.content_hash != crypto::content_hash(plaintext) {
+        return Err(ContainerError::Precondition(
+            "manifest.content_hash != sha256(plaintext)",
+        ));
+    }
+    if manifest.size_bytes != plaintext.len() as u64 {
+        return Err(ContainerError::Precondition(
+            "manifest.size_bytes != len(plaintext)",
+        ));
+    }
+    let recipient = manifest
+        .recipient
+        .as_ref()
+        .ok_or(ContainerError::Precondition("manifest.recipient is None"))?;
+    if recipient.x25519_pub != hex::encode(recipient_x25519_pub) {
+        return Err(ContainerError::Precondition(
+            "manifest.recipient.x25519_pub mismatch with recipient pubkey",
+        ));
+    }
+    if recipient_x25519_pub.len() != 32 {
+        return Err(ContainerError::Precondition("recipient pubkey must be 32 bytes"));
+    }
+    if issuer_ed25519_priv.len() != 32 {
+        return Err(ContainerError::Precondition("issuer priv key must be 32 bytes"));
+    }
+
+    manifest.sign(issuer_ed25519_priv)?;
+
+    let dek = crypto::random_dek();
+    let wrapped = crypto::wrap_dek_for_recipient(dek.as_ref(), recipient_x25519_pub)?;
+    let aad = manifest.content_hash.as_bytes();
+    let (nonce, ct) = crypto::aead_encrypt(dek.as_ref(), plaintext, aad)?;
+
+    let sf = SealedFile {
+        manifest: manifest.clone(),
+        wrapped_dek: wrapped.to_json_hex(),
+        aead_nonce: nonce,
+        ciphertext: ct,
+        suite_id: SUITE_CLASSIC_V1_ID,
+    };
+    sf.to_bytes()
+}
+
+/// Open a sealed blob. Returns (plaintext, manifest).
+pub fn open_sealed(
+    blob: &[u8],
+    recipient_x25519_priv: &[u8],
+    trusted_issuer_pubs: Option<&[String]>,
+) -> Result<(Vec<u8>, Manifest), ContainerError> {
+    if recipient_x25519_priv.len() != 32 {
+        return Err(ContainerError::Precondition("recipient priv key must be 32 bytes"));
+    }
+
+    let sf = SealedFile::from_bytes(blob)?;
+    if !sf.manifest.verify()? {
+        return Err(ContainerError::Manifest(ManifestError::MissingSignature));
+    }
+
+    if let Some(trusted) = trusted_issuer_pubs {
+        if !trusted.iter().any(|p| p == &sf.manifest.issuer_ed25519_pub) {
+            return Err(ContainerError::Precondition("issuer not in trusted set"));
+        }
+    }
+
+    // Policy enforcement (time-based) — expanded version in oversight-policy crate later
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs() as i64)
+        .unwrap_or(0);
+    if let Some(na) = sf.manifest.policy.get("not_after").and_then(|v| v.as_i64()) {
+        if now > na {
+            return Err(ContainerError::Precondition("file expired (not_after)"));
+        }
+    }
+    if let Some(nb) = sf.manifest.policy.get("not_before").and_then(|v| v.as_i64()) {
+        if now < nb {
+            return Err(ContainerError::Precondition("file not yet released (not_before)"));
+        }
+    }
+
+    // DEK unwrap: try slots if present, else single wrap
+    let dek = if let Some(slots) = sf.wrapped_dek.get("slots").and_then(|v| v.as_array()) {
+        let mut recovered = None;
+        for slot in slots {
+            let wrapped = WrappedDek::from_json_hex(slot)?;
+            if let Ok(dek) = crypto::unwrap_dek(&wrapped, recipient_x25519_priv) {
+                recovered = Some(dek);
+                break;
+            }
+        }
+        recovered.ok_or(ContainerError::NoDecryptableSlot { slots: slots.len() })?
+    } else {
+        let wrapped = WrappedDek::from_json_hex(&sf.wrapped_dek)?;
+        crypto::unwrap_dek(&wrapped, recipient_x25519_priv)?
+    };
+
+    let aad = sf.manifest.content_hash.as_bytes();
+    let plaintext = crypto::aead_decrypt(dek.as_ref(), &sf.aead_nonce, &sf.ciphertext, aad)?;
+
+    if crypto::content_hash(&plaintext) != sf.manifest.content_hash {
+        return Err(ContainerError::HashMismatch);
+    }
+
+    Ok((plaintext, sf.manifest))
+}
+
+/// Seal for multiple recipients (compact storage: one ciphertext, N key wraps).
+pub fn seal_multi(
+    plaintext: &[u8],
+    manifest: &mut Manifest,
+    issuer_ed25519_priv: &[u8],
+    recipient_x25519_pubs: &[&[u8]],
+) -> Result<Vec<u8>, ContainerError> {
+    if manifest.content_hash != crypto::content_hash(plaintext) {
+        return Err(ContainerError::Precondition(
+            "manifest.content_hash != sha256(plaintext)",
+        ));
+    }
+    if manifest.size_bytes != plaintext.len() as u64 {
+        return Err(ContainerError::Precondition(
+            "manifest.size_bytes != len(plaintext)",
+        ));
+    }
+    if recipient_x25519_pubs.is_empty() {
+        return Err(ContainerError::Precondition("need at least one recipient"));
+    }
+    for (i, pub_key) in recipient_x25519_pubs.iter().enumerate() {
+        if pub_key.len() != 32 {
+            return Err(ContainerError::Precondition(
+                "recipient pubkey must be 32 bytes",
+            ));
+        }
+        let _ = i;
+    }
+
+    manifest.sign(issuer_ed25519_priv)?;
+    let dek = crypto::random_dek();
+    let slots: Result<Vec<_>, _> = recipient_x25519_pubs
+        .iter()
+        .map(|p| crypto::wrap_dek_for_recipient(dek.as_ref(), p))
+        .collect();
+    let slots = slots?;
+    let slots_json: Vec<_> = slots.iter().map(|s| s.to_json_hex()).collect();
+
+    let aad = manifest.content_hash.as_bytes();
+    let (nonce, ct) = crypto::aead_encrypt(dek.as_ref(), plaintext, aad)?;
+
+    let sf = SealedFile {
+        manifest: manifest.clone(),
+        wrapped_dek: serde_json::json!({ "slots": slots_json }),
+        aead_nonce: nonce,
+        ciphertext: ct,
+        suite_id: SUITE_CLASSIC_V1_ID,
+    };
+    sf.to_bytes()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use oversight_crypto::ClassicIdentity;
+    use oversight_manifest::Recipient;
+
+    fn make_manifest(issuer: &ClassicIdentity, recipient: &ClassicIdentity, plaintext: &[u8]) -> Manifest {
+        Manifest::new(
+            "doc.txt",
+            crypto::content_hash(plaintext),
+            plaintext.len() as u64,
+            "issuer@test",
+            hex::encode(issuer.ed25519_pub),
+            Recipient {
+                recipient_id: "alice@test".into(),
+                x25519_pub: hex::encode(recipient.x25519_pub),
+                ed25519_pub: None,
+            },
+            "https://registry.test",
+            "text/plain",
+            None,
+            None,
+            "GLOBAL",
+        )
+    }
+
+    #[test]
+    fn seal_open_round_trip() {
+        let issuer = ClassicIdentity::generate();
+        let recipient = ClassicIdentity::generate();
+        let plaintext = b"This is my secret document.";
+        let mut m = make_manifest(&issuer, &recipient, plaintext);
+        let blob = seal(plaintext, &mut m, issuer.ed25519_priv.as_ref(), &recipient.x25519_pub).unwrap();
+        let (pt, manifest) = open_sealed(&blob, recipient.x25519_priv.as_ref(), None).unwrap();
+        assert_eq!(pt, plaintext);
+        assert_eq!(manifest.file_id, m.file_id);
+    }
+
+    #[test]
+    fn wrong_recipient_rejected() {
+        let issuer = ClassicIdentity::generate();
+        let alice = ClassicIdentity::generate();
+        let bob = ClassicIdentity::generate();
+        let plaintext = b"secret";
+        let mut m = make_manifest(&issuer, &alice, plaintext);
+        let blob = seal(plaintext, &mut m, issuer.ed25519_priv.as_ref(), &alice.x25519_pub).unwrap();
+        // Bob tries to open — should fail at AEAD stage
+        assert!(open_sealed(&blob, bob.x25519_priv.as_ref(), None).is_err());
+    }
+
+    #[test]
+    fn ciphertext_tamper_rejected() {
+        let issuer = ClassicIdentity::generate();
+        let alice = ClassicIdentity::generate();
+        let plaintext = b"secret";
+        let mut m = make_manifest(&issuer, &alice, plaintext);
+        let mut blob = seal(plaintext, &mut m, issuer.ed25519_priv.as_ref(), &alice.x25519_pub).unwrap();
+        let len = blob.len();
+        blob[len - 1] ^= 0x01;
+        assert!(open_sealed(&blob, alice.x25519_priv.as_ref(), None).is_err());
+    }
+
+    #[test]
+    fn bad_magic_rejected() {
+        let mut blob = vec![0u8; 100];
+        blob[0..6].copy_from_slice(b"FAKE\x00\x00");
+        assert!(SealedFile::from_bytes(&blob).is_err());
+    }
+
+    #[test]
+    fn oversized_manifest_rejected() {
+        let mut blob = Vec::new();
+        blob.extend_from_slice(&MAGIC);
+        blob.push(1);
+        blob.push(1);
+        // Claim a 5MB manifest
+        blob.extend_from_slice(&(5u32 * 1024 * 1024).to_be_bytes());
+        blob.resize(100, 0);
+        match SealedFile::from_bytes(&blob) {
+            Err(ContainerError::Oversized { field: "manifest", .. }) => (),
+            other => panic!("expected Oversized manifest error, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn truncated_file_rejected() {
+        // Just a magic byte, nothing else
+        let blob = MAGIC.to_vec();
+        assert!(SealedFile::from_bytes(&blob).is_err());
+    }
+
+    #[test]
+    fn expired_file_rejected() {
+        let issuer = ClassicIdentity::generate();
+        let alice = ClassicIdentity::generate();
+        let plaintext = b"secret";
+        let mut m = make_manifest(&issuer, &alice, plaintext);
+        m.policy["not_after"] = serde_json::json!(1000);  // long ago
+        let blob = seal(plaintext, &mut m, issuer.ed25519_priv.as_ref(), &alice.x25519_pub).unwrap();
+        match open_sealed(&blob, alice.x25519_priv.as_ref(), None) {
+            Err(ContainerError::Precondition("file expired (not_after)")) => (),
+            other => panic!("expected expiry error, got {:?}", other.is_ok()),
+        }
+    }
+
+    #[test]
+    fn seal_multi_three_recipients() {
+        let issuer = ClassicIdentity::generate();
+        let alice = ClassicIdentity::generate();
+        let bob = ClassicIdentity::generate();
+        let carol = ClassicIdentity::generate();
+        let stranger = ClassicIdentity::generate();
+
+        let plaintext = b"shared document for cohort";
+        // For seal_multi, we use a placeholder recipient in the manifest
+        let mut m = Manifest::new(
+            "cohort.txt",
+            crypto::content_hash(plaintext),
+            plaintext.len() as u64,
+            "issuer@test",
+            hex::encode(issuer.ed25519_pub),
+            Recipient {
+                recipient_id: "cohort".into(),
+                x25519_pub: hex::encode(alice.x25519_pub), // placeholder
+                ed25519_pub: None,
+            },
+            "https://registry.test",
+            "text/plain",
+            None,
+            None,
+            "GLOBAL",
+        );
+        let recipients: Vec<&[u8]> = vec![&alice.x25519_pub, &bob.x25519_pub, &carol.x25519_pub];
+        let blob = seal_multi(plaintext, &mut m, issuer.ed25519_priv.as_ref(), &recipients).unwrap();
+
+        // All three should decrypt
+        for r in [&alice, &bob, &carol] {
+            let (pt, _) = open_sealed(&blob, r.x25519_priv.as_ref(), None).unwrap();
+            assert_eq!(pt, plaintext);
+        }
+        // Stranger should fail
+        assert!(open_sealed(&blob, stranger.x25519_priv.as_ref(), None).is_err());
+    }
+}

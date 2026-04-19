@@ -1,0 +1,15 @@
+[package]
+name = "oversight-container"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "Binary .sealed container format for Oversight"
+
+[dependencies]
+oversight-crypto = { path = "../oversight-crypto" }
+oversight-manifest = { path = "../oversight-manifest" }
+serde.workspace = true
+serde_json.workspace = true
+hex.workspace = true
+thiserror.workspace = true

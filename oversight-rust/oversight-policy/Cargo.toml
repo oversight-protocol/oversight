@@ -1,0 +1,17 @@
+[package]
+name = "oversight-policy"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "Policy enforcement for Oversight: not_after / not_before / max_opens / jurisdiction"
+
+[dependencies]
+oversight-manifest = { path = "../oversight-manifest" }
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+fs2 = "0.4"
+
+[dev-dependencies]
+tempfile = "3"

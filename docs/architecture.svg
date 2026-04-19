@@ -1,0 +1,163 @@
+<svg viewBox="0 0 1400 900" xmlns="http://www.w3.org/2000/svg" font-family="ui-sans-serif, system-ui, sans-serif">
+  <style>
+    .title { font-size: 26px; font-weight: 600; fill: #0b1220; }
+    .subtitle { font-size: 14px; fill: #475569; }
+    .lane { font-size: 15px; font-weight: 600; fill: #334155; }
+    .box { fill: white; stroke: #334155; stroke-width: 1.5; rx: 8; ry: 8; }
+    .box-accent { fill: #f8fafc; stroke: #0f172a; stroke-width: 2; rx: 8; ry: 8; }
+    .box-warn { fill: #fef3c7; stroke: #b45309; stroke-width: 1.5; rx: 8; ry: 8; }
+    .box-good { fill: #dcfce7; stroke: #15803d; stroke-width: 1.5; rx: 8; ry: 8; }
+    .box-leak { fill: #fee2e2; stroke: #b91c1c; stroke-width: 1.5; rx: 8; ry: 8; }
+    .label { font-size: 13px; font-weight: 600; fill: #0f172a; }
+    .sublabel { font-size: 11px; fill: #475569; }
+    .arrow { stroke: #334155; stroke-width: 1.5; fill: none; marker-end: url(#ah); }
+    .arrow-dash { stroke: #334155; stroke-width: 1.5; stroke-dasharray: 6,4; fill: none; marker-end: url(#ah); }
+    .arrow-red { stroke: #b91c1c; stroke-width: 2; fill: none; marker-end: url(#ahr); }
+    .lane-bg-a { fill: #f1f5f9; }
+    .lane-bg-b { fill: #ecfdf5; }
+    .lane-bg-c { fill: #fef3c7; opacity: 0.4; }
+    .lane-bg-d { fill: #fee2e2; opacity: 0.4; }
+    .caption { font-size: 11px; fill: #1e293b; font-style: italic; }
+  </style>
+
+  <defs>
+    <marker id="ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto">
+      <path d="M0,0 L10,5 L0,10 z" fill="#334155"/>
+    </marker>
+    <marker id="ahr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto">
+      <path d="M0,0 L10,5 L0,10 z" fill="#b91c1c"/>
+    </marker>
+  </defs>
+
+  <!-- title -->
+  <text x="40" y="42" class="title">OVERSIGHT — Sealed Entity, Notarized Trust, Integrity &amp; Evidence Layer</text>
+  <text x="40" y="66" class="subtitle">Open protocol for data provenance, attribution, and leak detection. Format-agnostic, post-quantum-ready, jurisdiction-aware.</text>
+
+  <!-- Lane A: Issuer side -->
+  <rect x="30" y="90" width="400" height="380" class="lane-bg-a" rx="8"/>
+  <text x="50" y="115" class="lane">ISSUER SIDE (sealing)</text>
+
+  <rect x="60" y="135" width="340" height="60" class="box"/>
+  <text x="80" y="158" class="label">1. Plaintext payload</text>
+  <text x="80" y="178" class="sublabel">any format: docx, pdf, mp4, json, raw bytes</text>
+
+  <rect x="60" y="210" width="340" height="70" class="box-accent"/>
+  <text x="80" y="233" class="label">2. Apply per-recipient watermarks</text>
+  <text x="80" y="252" class="sublabel">L1 zero-width unicode  ·  L2 whitespace patterns</text>
+  <text x="80" y="269" class="sublabel">L3 synonym rotation  ·  L4 DCT visual (reserved)</text>
+
+  <rect x="60" y="295" width="340" height="70" class="box-accent"/>
+  <text x="80" y="318" class="label">3. Build signed manifest</text>
+  <text x="80" y="337" class="sublabel">file_id · recipient · content_hash · policy · marks</text>
+  <text x="80" y="354" class="sublabel">Ed25519 signature (+ ML-DSA in HYBRID suite)</text>
+
+  <rect x="60" y="380" width="340" height="70" class="box-accent"/>
+  <text x="80" y="403" class="label">4. Seal → .sealed blob</text>
+  <text x="80" y="422" class="sublabel">XChaCha20-Poly1305(DEK, plaintext, AAD=content_hash)</text>
+  <text x="80" y="439" class="sublabel">DEK wrapped: X25519 ECDH (+ ML-KEM-768 hybrid)</text>
+
+  <!-- Arrow down -->
+  <path d="M230,195 L230,210" class="arrow"/>
+  <path d="M230,280 L230,295" class="arrow"/>
+  <path d="M230,365 L230,380" class="arrow"/>
+
+  <!-- Lane B: Recipient -->
+  <rect x="480" y="90" width="400" height="380" class="lane-bg-b" rx="8"/>
+  <text x="500" y="115" class="lane">RECIPIENT SIDE (open)</text>
+
+  <rect x="510" y="135" width="340" height="60" class="box-good"/>
+  <text x="530" y="158" class="label">5. Alice receives .sealed blob</text>
+  <text x="530" y="178" class="sublabel">over any channel: email, S3, USB, Slack, etc.</text>
+
+  <rect x="510" y="210" width="340" height="70" class="box-good"/>
+  <text x="530" y="233" class="label">6. Verify manifest signature</text>
+  <text x="530" y="252" class="sublabel">Rejects forged issuer, tampered metadata,</text>
+  <text x="530" y="269" class="sublabel">or untrusted issuer (pinned key set).</text>
+
+  <rect x="510" y="295" width="340" height="70" class="box-good"/>
+  <text x="530" y="318" class="label">7. Unwrap DEK, decrypt, verify hash</text>
+  <text x="530" y="337" class="sublabel">AEAD tag binds ciphertext↔manifest.</text>
+  <text x="530" y="354" class="sublabel">Post-decrypt SHA-256 cross-check.</text>
+
+  <rect x="510" y="380" width="340" height="70" class="box-good"/>
+  <text x="530" y="403" class="label">8. Render → beacons fire (passive)</text>
+  <text x="530" y="422" class="sublabel">&lt;img&gt; tag, DNS, OCSP, license check.</text>
+  <text x="530" y="439" class="sublabel">No code exec. No RAT. Standard HTTP only.</text>
+
+  <path d="M680,195 L680,210" class="arrow"/>
+  <path d="M680,280 L680,295" class="arrow"/>
+  <path d="M680,365 L680,380" class="arrow"/>
+
+  <!-- Arrow from issuer to recipient -->
+  <path d="M400,415 C430,415 450,415 510,165" class="arrow"/>
+  <text x="420" y="320" class="caption" transform="rotate(-38 420 320)">sealed file</text>
+
+  <!-- Lane C: Registry -->
+  <rect x="930" y="90" width="440" height="380" class="lane-bg-c" rx="8"/>
+  <text x="950" y="115" class="lane">ATTRIBUTION REGISTRY</text>
+
+  <rect x="960" y="135" width="380" height="60" class="box-warn"/>
+  <text x="980" y="158" class="label">POST /register</text>
+  <text x="980" y="178" class="sublabel">issuer submits manifest + beacon+mark IDs</text>
+
+  <rect x="960" y="210" width="380" height="90" class="box-warn"/>
+  <text x="980" y="233" class="label">Beacon receivers</text>
+  <text x="980" y="252" class="sublabel">GET /p/{id}.png     — http image beacon</text>
+  <text x="980" y="269" class="sublabel">GET /r/{id}         — ocsp-style beacon</text>
+  <text x="980" y="286" class="sublabel">GET /v/{id}         — license check</text>
+
+  <rect x="960" y="315" width="380" height="70" class="box-warn"/>
+  <text x="980" y="338" class="label">Event logging</text>
+  <text x="980" y="357" class="sublabel">RFC 3161 qualified timestamps</text>
+  <text x="980" y="374" class="sublabel">Transparency log (Sigstore-style Merkle)</text>
+
+  <rect x="960" y="400" width="380" height="55" class="box-warn"/>
+  <text x="980" y="423" class="label">POST /attribute    GET /evidence/{file_id}</text>
+  <text x="980" y="441" class="sublabel">maps token_id | mark_id → (file, recipient, issuer)</text>
+
+  <!-- Issuer registers -->
+  <path d="M400,165 L960,165" class="arrow-dash"/>
+  <text x="570" y="158" class="caption">/register (issuer → registry)</text>
+
+  <!-- Recipient beacons call registry -->
+  <path d="M850,415 L960,245" class="arrow-dash"/>
+  <text x="875" y="330" class="caption" transform="rotate(-52 875 330)">beacon callbacks on open</text>
+
+  <!-- Lane D: Leak path -->
+  <rect x="30" y="500" width="1340" height="360" class="lane-bg-d" rx="8"/>
+  <text x="50" y="525" class="lane">LEAK &amp; ATTRIBUTION PATH</text>
+
+  <rect x="60" y="545" width="300" height="80" class="box-leak"/>
+  <text x="80" y="568" class="label">9. Recipient leaks plaintext</text>
+  <text x="80" y="587" class="sublabel">posts to breach forum, Telegram,</text>
+  <text x="80" y="604" class="sublabel">paste site, Tor market, etc.</text>
+
+  <rect x="400" y="545" width="300" height="80" class="box-leak"/>
+  <text x="420" y="568" class="label">10. Scraper detects leak</text>
+  <text x="420" y="587" class="sublabel">continuous monitoring of known</text>
+  <text x="420" y="604" class="sublabel">leak channels (Artemis pipeline)</text>
+
+  <rect x="740" y="545" width="300" height="80" class="box-leak"/>
+  <text x="760" y="568" class="label">11. Extract watermarks</text>
+  <text x="760" y="587" class="sublabel">L1/L2/L3 recovery from</text>
+  <text x="760" y="604" class="sublabel">leaked plaintext</text>
+
+  <rect x="1080" y="545" width="290" height="80" class="box-leak"/>
+  <text x="1100" y="568" class="label">12. Query registry /attribute</text>
+  <text x="1100" y="587" class="sublabel">mark_id → source recipient</text>
+  <text x="1100" y="604" class="sublabel">identified within seconds</text>
+
+  <path d="M360,585 L400,585" class="arrow-red"/>
+  <path d="M700,585 L740,585" class="arrow-red"/>
+  <path d="M1040,585 L1080,585" class="arrow-red"/>
+
+  <rect x="60" y="660" width="1310" height="100" class="box"/>
+  <text x="80" y="685" class="label">13. Evidence bundle for forensic + legal response</text>
+  <text x="80" y="707" class="sublabel">signed manifest · per-event qualified timestamps · transparency-log proofs · event log (IPs, UAs, callbacks)</text>
+  <text x="80" y="725" class="sublabel">combined with ISO/IEC 27037 chain-of-custody procedure and RFC 3161 TimeStampTokens → foundation of court-admissible report</text>
+  <text x="80" y="745" class="sublabel">NOTE: the bundle is a provenance record, not a legal finding. A qualified examiner + methodology docs are required for court admission.</text>
+
+  <rect x="60" y="780" width="1310" height="65" class="box-accent"/>
+  <text x="80" y="804" class="label">Layers not in MVP (roadmap): hardware attestation (Intel TDX / AMD SEV-SNP / Nitro Enclaves) for keygated decryption inside attested TEEs;</text>
+  <text x="80" y="822" class="sublabel">LLM-generated decoy files scattered in sensitive folders; C2PA interop for media; federated multi-registry trust fabric; hybrid PQ suites fully linked via liboqs.</text>
+</svg>

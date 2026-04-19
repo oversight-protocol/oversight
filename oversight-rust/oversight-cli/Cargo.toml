@@ -1,0 +1,23 @@
+[package]
+name = "oversight-cli"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "Command-line tool for Oversight: keygen, seal, open, inspect"
+default-run = "oversight"
+
+[[bin]]
+name = "oversight"
+path = "src/main.rs"
+
+[dependencies]
+oversight-crypto = { path = "../oversight-crypto" }
+oversight-container = { path = "../oversight-container" }
+oversight-manifest = { path = "../oversight-manifest" }
+oversight-watermark = { path = "../oversight-watermark" }
+clap.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+hex.workspace = true
+thiserror.workspace = true
