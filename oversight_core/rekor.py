@@ -310,26 +310,38 @@ def upload_dsse(
 ) -> RekorUploadResult:
     """POST a DSSE envelope to Rekor v2.
 
-    ``issuer_ed25519_pub_pem`` is the issuer's verification key in PEM.
-    Rekor v2 self-managed-key submissions require a verifier key alongside
-    the envelope so the log can sanity-check that the envelope is verifiable
-    before accepting it.
+    ``issuer_ed25519_pub_pem`` is the issuer's verification key in PEM. The
+    upload payload converts it to the DER (SubjectPublicKeyInfo) bytes that
+    the Rekor v2 ``Verifier.PublicKey.raw_bytes`` field actually requires.
+
+    Wire shape per
+    https://github.com/sigstore/rekor-tiles/blob/main/api/proto/rekor/v2/dsse.proto
+    (verified 2026-04-19): ``verifiers`` is a repeated field; each verifier
+    carries ``publicKey.rawBytes`` (DER) and a sibling ``keyDetails`` enum
+    string (e.g. ``PKIX_ED25519``).
 
     Network errors raise; callers decide whether to retry or fall back to
     the local tlog (only acceptable for development, not production).
     """
+    # Rekor's PublicKey.raw_bytes wants DER (SubjectPublicKeyInfo), not PEM.
+    from cryptography.hazmat.primitives import serialization as _ser
+    pub_obj = _ser.load_pem_public_key(issuer_ed25519_pub_pem.encode("utf-8"))
+    pub_der = pub_obj.public_bytes(
+        encoding=_ser.Encoding.DER,
+        format=_ser.PublicFormat.SubjectPublicKeyInfo,
+    )
     body = json.dumps(
         {
             "dsseRequestV002": {
                 "envelope": json.loads(envelope.to_json()),
-                "verifier": {
-                    "publicKey": {
-                        "rawBytes": base64.b64encode(
-                            issuer_ed25519_pub_pem.encode("utf-8")
-                        ).decode("ascii"),
+                "verifiers": [
+                    {
+                        "publicKey": {
+                            "rawBytes": base64.b64encode(pub_der).decode("ascii"),
+                        },
                         "keyDetails": "PKIX_ED25519",
                     }
-                },
+                ],
             }
         }
     ).encode("utf-8")
