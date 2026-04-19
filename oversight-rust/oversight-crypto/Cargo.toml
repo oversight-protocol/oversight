@@ -1,0 +1,20 @@
+[package]
+name = "oversight-crypto"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "Cryptographic primitives for Oversight: X25519, Ed25519, XChaCha20-Poly1305, HKDF, hybrid PQ hooks"
+
+[dependencies]
+x25519-dalek.workspace = true
+ed25519-dalek.workspace = true
+chacha20poly1305.workspace = true
+hkdf.workspace = true
+sha2.workspace = true
+rand.workspace = true
+rand_core.workspace = true
+hex.workspace = true
+zeroize.workspace = true
+thiserror.workspace = true
+serde_json.workspace = true

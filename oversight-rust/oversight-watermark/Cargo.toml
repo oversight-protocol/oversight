@@ -1,0 +1,10 @@
+[package]
+name = "oversight-watermark"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "Per-recipient text watermarking for Oversight (L1 zero-width, L2 whitespace)"
+
+[dependencies]
+rand.workspace = true

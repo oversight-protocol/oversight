@@ -1,0 +1,48 @@
+# Rust
+target/
+**/*.rs.bk
+Cargo.lock.bak
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+.tox/
+build/
+dist/
+*.so
+
+# Virtualenvs
+.venv/
+venv/
+env/
+
+# Editor / OS
+.vscode/
+.idea/
+*.swp
+.DS_Store
+Thumbs.db
+
+# Local sealed bundles (privacy: never commit)
+*.sealed
+*.bundle.local
+
+# Local secrets / runtime
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+secrets/
+
+# Logs / scratch
+*.log
+scratch/
+tmp/
