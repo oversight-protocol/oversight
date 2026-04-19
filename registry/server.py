@@ -36,6 +36,7 @@ from pydantic import BaseModel
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from oversight_core.tlog import TransparencyLog
 from oversight_core.manifest import Manifest
+from oversight_core import rekor as rekor_mod
 
 
 DB_PATH = Path(os.environ.get("OVERSIGHT_DB", "/tmp/oversight-registry.sqlite"))
@@ -44,6 +45,13 @@ TLOG_DIR = DATA_DIR / "tlog"
 IDENTITY_PATH = DATA_DIR / "registry-identity.json"
 TRUSTED_PROXY = bool(int(os.environ.get("TRUSTED_PROXY", "0")))
 # When TRUSTED_PROXY=1, honor X-Forwarded-For for rate limiting.
+
+# Rekor v2 wiring (v0.5 Session B). Off by default so existing tests do not
+# generate live network traffic. Set OVERSIGHT_REKOR_ENABLED=1 to opt in.
+# Failures are non-fatal: registry remains usable when Rekor is unreachable;
+# the local SQLite tlog continues to be the authoritative event index.
+REKOR_ENABLED = bool(int(os.environ.get("OVERSIGHT_REKOR_ENABLED", "0")))
+REKOR_URL = os.environ.get("OVERSIGHT_REKOR_URL", rekor_mod.DEFAULT_REKOR_URL)
 
 
 SCHEMA = """
@@ -254,6 +262,74 @@ def _append_tlog(event: dict) -> int:
     return TLOG.append(event) if TLOG else -1
 
 
+def _attest_to_rekor(
+    file_id: str,
+    issuer_pub_hex: str,
+    recipient_id: str,
+    recipient_pubkey_hex: Optional[str],
+    suite: str,
+    content_hash_sha256_hex: str,
+    mark_id_hex: str,
+) -> Optional[dict]:
+    """Sign a registration predicate with the registry's identity key and
+    append it to a public Rekor v2 log.
+
+    Returns a small JSON-serializable summary on success (log_url, log_index,
+    log_id, integrated_time) so the response can carry it back to the client.
+    Returns ``None`` when REKOR_ENABLED is false. Returns a dict with an
+    ``error`` field (and no log_index) when the upload itself fails — the
+    caller treats this as non-fatal.
+    """
+    if not REKOR_ENABLED or IDENTITY is None:
+        return None
+    try:
+        recipient_hash = (
+            rekor_mod.hash_recipient_pubkey(recipient_pubkey_hex)
+            if recipient_pubkey_hex
+            else "0" * 64
+        )
+        predicate = rekor_mod.OversightRegistrationPredicate(
+            file_id=file_id,
+            issuer_pubkey_ed25519=issuer_pub_hex,
+            recipient_id=recipient_id,
+            recipient_pubkey_sha256=recipient_hash,
+            suite=suite,
+            registered_at=timestamp_stub(),
+        )
+        statement = rekor_mod.build_statement(
+            mark_id_hex=mark_id_hex,
+            content_hash_sha256_hex=content_hash_sha256_hex,
+            predicate=predicate,
+        )
+        envelope = rekor_mod.sign_dsse(
+            statement=statement,
+            issuer_ed25519_priv=bytes.fromhex(IDENTITY["ed25519_priv"]),
+        )
+        # Build a PEM for the registry's verifier key. Rekor v2 needs PEM.
+        registry_pub = Ed25519PublicKey.from_public_bytes(
+            bytes.fromhex(IDENTITY["ed25519_pub"])
+        )
+        pub_pem = registry_pub.public_bytes(
+            encoding=serialization.Encoding.PEM,
+            format=serialization.PublicFormat.SubjectPublicKeyInfo,
+        ).decode("ascii")
+        result = rekor_mod.upload_dsse(
+            envelope=envelope,
+            issuer_ed25519_pub_pem=pub_pem,
+            log_url=REKOR_URL,
+        )
+        return {
+            "log_url": result.log_url,
+            "log_index": result.log_index,
+            "log_id": result.log_id,
+            "integrated_time": result.integrated_time,
+            "tlog_kind": rekor_mod.TLOG_KIND,
+            "bundle_schema": rekor_mod.BUNDLE_SCHEMA,
+        }
+    except Exception as e:
+        return {"error": f"{type(e).__name__}: {e}", "tlog_kind": rekor_mod.TLOG_KIND}
+
+
 def _rate_limit(request: Request):
     if not BUCKET.allow(_client_key(request)):
         raise HTTPException(429, "rate limit exceeded")
@@ -348,11 +424,22 @@ def register(req: RegistrationRequest, request: Request):
         "timestamp": timestamp_stub(),
     })
 
+    rekor_result = _attest_to_rekor(
+        file_id=file_id,
+        issuer_pub_hex=issuer_pub,
+        recipient_id=recipient_id,
+        recipient_pubkey_hex=recipient.get("x25519_pub"),
+        suite=m.get("suite", "classic"),
+        content_hash_sha256_hex=(m.get("content") or {}).get("sha256", "0" * 64),
+        mark_id_hex=file_id,
+    )
+
     return {
         "ok": True,
         "file_id": file_id,
         "registered_beacons": len(req.beacons),
         "tlog_index": tlog_idx,
+        "rekor": rekor_result,
     }
 
 
