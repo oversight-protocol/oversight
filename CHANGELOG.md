@@ -1,5 +1,41 @@
 # Oversight CHANGELOG
 
+## v0.5.0 — 2026-04-19
+
+First release with public-Rekor attestations. Now hosted at
+https://github.com/oversight-protocol/oversight (so the v0.5 predicate URI
+resolves for any third-party verifier).
+
+### Session B (registry wiring + e2e + backcompat)
+- `registry/server.py`: `/register` now opt-in attests each registration into
+  a public Rekor v2 log. Off by default; opt in with
+  `OVERSIGHT_REKOR_ENABLED=1`. Failures non-fatal — local SQLite tlog stays
+  authoritative for "list marks for issuer X" queries.
+- `oversight_core/rekor.py upload_dsse`: fixed three wire-shape bugs against
+  current rekor-tiles proto (`verifier`→`verifiers` array, `keyDetails` as
+  sibling of `publicKey`, `raw_bytes` carries DER not PEM). Verified live
+  against `log2025-1.rekor.sigstore.dev` — got real `log_index` returned.
+- `tests/test_rekor_e2e.py`: 2 live tests, gated behind
+  `OVERSIGHT_REKOR_E2E=1` so default runs do not append entries to the
+  public log.
+- `tests/test_rekor_backcompat.py`: 5 offline checks of v0.4 contract
+  preservation.
+
+### Session C (Rust crate + cross-language conformance + version bump)
+- New crate `oversight-rust/oversight-rekor`: bit-identical port of
+  `oversight_core.rekor`. 9 inline tests cover PAE byte-exactness,
+  sign/verify round trip, tamper + wrong-key rejection, statement shape,
+  canonical envelope JSON, and offline TLE inclusion check.
+- New conformance suite `oversight-rust/tests/conformance_rekor.sh`: proves
+  Python ↔ Rust bit-identity in 4 ways — PAE bytes, Python-signs/Rust-verifies,
+  Rust-signs/Python-verifies, canonical payload bytes for the same statement.
+- Version bumped to 0.5.0 across `oversight-rust/Cargo.toml`, `README.md`,
+  `docs/SPEC.md`.
+
+Hard constraints respected: no new crypto primitives (RustCrypto +
+`cryptography`'s Ed25519 only), test count additions-only, Python ↔ Rust
+bit-identity proven by conformance script.
+
 ## Unreleased — v0.5 Session A (2026-04-19)
 - Added `docs/V05_REKOR_PLAN.md`: full Rekor v2 migration plan, verified
   against current upstream API (Rekor v2 GA 2025-10-10, DSSE + hashedrekord

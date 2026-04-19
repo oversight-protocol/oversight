@@ -1,4 +1,4 @@
-# Oversight v0.4
+# Oversight v0.5
 
 **Open protocol + reference implementation for data provenance, attribution, and leak detection.**
 

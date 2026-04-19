@@ -1,0 +1,26 @@
+[package]
+name = "oversight-rekor"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "Sigstore Rekor v2 DSSE attestation client for Oversight (bit-identical to oversight_core.rekor)"
+
+[dependencies]
+ed25519-dalek = { workspace = true }
+sha2 = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+serde_jcs = { workspace = true }
+hex = { workspace = true }
+thiserror = { workspace = true }
+base64 = "0.22"
+ureq = { version = "2.10", default-features = false, features = ["tls", "json"], optional = true }
+
+[features]
+default = []
+upload = ["dep:ureq"]
+
+[dev-dependencies]
+hex = { workspace = true }
+rand_core = { workspace = true, features = ["std", "getrandom"] }
