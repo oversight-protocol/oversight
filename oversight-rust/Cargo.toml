@@ -9,11 +9,12 @@ members = [
     "oversight-policy",
     "oversight-semantic",
     "oversight-cli",
+    "oversight-rekor",
 ]
 exclude = ["fuzz"]
 
 [workspace.package]
-version = "0.4.1"
+version = "0.5.0"
 edition = "2021"
 rust-version = "1.75"
 license = "Apache-2.0"

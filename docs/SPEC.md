@@ -2,7 +2,7 @@
 
 **Sealed Entity, Notarized Trust, Integrity & Evidence Layer**
 
-Version 0.1 — Draft — April 2026
+Version 0.5 — Draft — April 2026
 
 ---
 
