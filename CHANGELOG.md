@@ -25,8 +25,8 @@ Review-driven hardening from `P:/Oversight/oversight-protocol-review.md`.
   scoped ecosystem plugins to Outlook-first, and prioritized SIEM integration
   before SOC 2 / ISO 27001 work.
 - Raised vulnerable dependency floors flagged by Dependabot/PyPI advisory
-  checks: cryptography, PyNaCl, pydantic, python-multipart, Pillow, and
-  pypdf now require patched minimums.
+  checks: setuptools, cryptography, PyNaCl, pydantic, python-multipart,
+  Pillow, and pypdf now require patched minimums.
 - Added focused regression coverage in `tests/test_l3_policy_unit.py`.
 
 ## v0.4.4 - 2026-04-20 security hardening
