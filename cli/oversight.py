@@ -417,7 +417,7 @@ def main():
     s.add_argument("--issuer-id", required=True)
     s.add_argument("--issuer-key", required=True)
     s.add_argument("--registry-url", required=True)
-    s.add_argument("--registry-domain", default="oversight.example")
+    s.add_argument("--registry-domain", default="oversightprotocol.dev")
     s.add_argument("--out", required=True)
     s.add_argument("--content-type", default="application/octet-stream")
     s.add_argument("--watermark", action="store_true", help="embed text watermarks")

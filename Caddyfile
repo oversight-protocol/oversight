@@ -1,17 +1,17 @@
 # OVERSIGHT registry — production Caddy config.
 #
-# Replace `oversight.example.com` with the beacon domain you actually own
+# Replace `oversightprotocol.dev` with the beacon domain you actually own
 # (the one whose hostname is baked into the beacon URLs you mint).
 #
 # Beacons look like:
-#   https://b.oversight.example.com/p/{token}.png
-#   https://ocsp.oversight.example.com/r/{token}
-#   https://lic.oversight.example.com/v/{token}
+#   https://b.oversightprotocol.dev/p/{token}.png
+#   https://ocsp.oversightprotocol.dev/r/{token}
+#   https://lic.oversightprotocol.dev/v/{token}
 #
 # The simplest setup uses a single apex + path-based routing. Caddy auto-provisions
 # TLS via Let's Encrypt.
 
-oversight.example.com {
+oversightprotocol.dev {
     encode gzip
 
     # Attribution / evidence API — lock down with auth in production.

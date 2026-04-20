@@ -209,7 +209,7 @@ def cmd_init(args):
     config = {
         "issuer_identity": "",
         "registry_url": args.registry_url or "http://localhost:8000",
-        "registry_domain": args.registry_domain or "oversight.example",
+        "registry_domain": args.registry_domain or "oversightprotocol.dev",
         "default_watermark": True,
         "content_type": "application/octet-stream",
     }
@@ -506,7 +506,7 @@ def cmd_seal(args):
 
     # Resolve settings
     registry_url = args.registry_url or cfg.get("registry_url", "http://localhost:8000")
-    registry_domain = args.registry_domain or cfg.get("registry_domain", "oversight.example")
+    registry_domain = args.registry_domain or cfg.get("registry_domain", "oversightprotocol.dev")
     issuer_id = args.issuer_id or issuer.get("id", "issuer")
     do_watermark = args.watermark if args.watermark is not None else cfg.get("default_watermark", True)
     content_type_val = args.content_type or cfg.get("content_type", "application/octet-stream")
