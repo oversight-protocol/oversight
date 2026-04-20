@@ -46,6 +46,8 @@ from oversight_core import (
     watermark,
 )
 from oversight_core.container import SealedFile
+from oversight_core import semantic
+from oversight_core.fingerprint import ContentFingerprint
 
 
 # ---------------- keygen ----------------
@@ -78,7 +80,7 @@ def cmd_seal(args):
     issuer = json.loads(Path(args.issuer_key).read_text())
     rec_pub = json.loads(Path(args.recipient_pub).read_text())
 
-    # Optional watermarking (text files only, MVP)
+    # Optional watermarking (text files only)
     watermarks_for_manifest: list[WatermarkRef] = []
     if args.watermark:
         try:
@@ -88,19 +90,31 @@ def cmd_seal(args):
             text = None
 
         if text is not None:
-            mark_id_zw = watermark.new_mark_id()
-            mark_id_ws = watermark.new_mark_id()
-            text = watermark.embed_zw(text, mark_id_zw)
-            text = watermark.embed_ws(text, mark_id_ws)
+            # Generate a single mark_id shared across all layers for simpler
+            # attribution (one ID per recipient, not one per layer).
+            mark_id = watermark.new_mark_id()
+
+            # Apply layers in correct order: L3 first (rewrites words),
+            # then L2 (trailing whitespace), then L1 (zero-width chars).
+            # This prevents L1's invisible chars from fragmenting L3 synonym
+            # words during embedding.
+            text = semantic.apply_semantic(text, mark_id)
+            text = watermark.embed_ws(text, mark_id)
+            text = watermark.embed_zw(text, mark_id)
             plaintext = text.encode("utf-8")
+
             watermarks_for_manifest.append(WatermarkRef(
-                layer="L1_zero_width", mark_id=mark_id_zw.hex()
+                layer="L1_zero_width", mark_id=mark_id.hex()
             ))
             watermarks_for_manifest.append(WatermarkRef(
-                layer="L2_whitespace", mark_id=mark_id_ws.hex()
+                layer="L2_whitespace", mark_id=mark_id.hex()
             ))
-            print(f"[+] embedded L1 mark {mark_id_zw.hex()}")
-            print(f"[+] embedded L2 mark {mark_id_ws.hex()}")
+            watermarks_for_manifest.append(WatermarkRef(
+                layer="L3_semantic", mark_id=mark_id.hex()
+            ))
+            print(f"[+] embedded L1 mark {mark_id.hex()}")
+            print(f"[+] embedded L2 mark {mark_id.hex()}")
+            print(f"[+] embedded L3 mark {mark_id.hex()} (semantic + punctuation)")
 
     # Recipient
     recipient = Recipient(
@@ -129,6 +143,18 @@ def cmd_seal(args):
     manifest.watermarks = watermarks_for_manifest
     manifest.beacons = [b.to_dict() for b in beacons]
 
+    # Compute content fingerprint for the watermarked plaintext.
+    # This is the per-recipient fingerprint stored server-side so we can
+    # identify the source copy even if all watermarks are stripped (VM export attack).
+    fingerprint = None
+    try:
+        fingerprint_text = plaintext.decode("utf-8")
+        fingerprint = ContentFingerprint.from_text(fingerprint_text)
+        print(f"[+] content fingerprint: {len(fingerprint.winnowing_fp)} winnow hashes, "
+              f"{len(fingerprint.sentence_fp)} sentence hashes")
+    except UnicodeDecodeError:
+        pass  # binary file, no fingerprint
+
     blob = seal(
         plaintext=plaintext,
         manifest=manifest,
@@ -142,6 +168,17 @@ def cmd_seal(args):
     print(f"[+] recipient={recipient.recipient_id}")
     print(f"[+] beacons={len(beacons)}  watermarks={len(watermarks_for_manifest)}")
 
+    # Store fingerprint alongside the sealed file
+    if fingerprint:
+        fp_path = Path(args.out).with_suffix(".fingerprint.json")
+        fp_path.write_text(json.dumps({
+            "file_id": manifest.file_id,
+            "recipient_id": rec_pub["id"],
+            "mark_id": watermarks_for_manifest[0].mark_id if watermarks_for_manifest else None,
+            "fingerprint": fingerprint.to_dict(),
+        }, indent=2))
+        print(f"[+] wrote fingerprint to {fp_path}")
+
     # Register with registry (optional)
     if args.register:
         reg_payload = {
@@ -149,6 +186,8 @@ def cmd_seal(args):
             "beacons": [b.to_dict() for b in beacons],
             "watermarks": [w.__dict__ for w in watermarks_for_manifest],
         }
+        if fingerprint:
+            reg_payload["fingerprint"] = fingerprint.to_dict()
         try:
             resp = httpx.post(
                 f"{args.register.rstrip('/')}/register",
@@ -193,34 +232,173 @@ def cmd_inspect(args):
 
 def cmd_attribute(args):
     text = Path(args.leak).read_text(encoding="utf-8", errors="replace")
-    marks = watermark.recover_marks(text)
-    print("[*] recovered marks:")
-    any_found = False
-    for layer, mlist in marks.items():
-        for m in mlist:
-            print(f"    {layer}: {m.hex()}")
-            any_found = True
-    if not any_found:
-        print("    (none)")
-        return
 
-    print(f"[*] querying registry {args.registry} ...")
-    for layer, mlist in marks.items():
-        for m in mlist:
+    # Phase 1: Extract L1/L2 marks directly from text
+    print("[*] Phase 1: Direct extraction (L1 + L2)")
+    l1_marks = watermark.extract_zw(text)
+    l2_candidate, l2_conf, l2_bits, l2_needed = watermark.extract_ws_partial(text)
+
+    l1_unique = list(set(l1_marks))
+    direct_candidates: list[bytes] = list(l1_unique)
+    if l2_candidate and l2_conf >= 0.5:
+        if l2_candidate not in direct_candidates:
+            direct_candidates.append(l2_candidate)
+
+    if l1_unique:
+        print(f"    L1: {len(l1_marks)} frames, {len(l1_unique)} unique mark(s)")
+        for m in l1_unique:
+            print(f"        {m.hex()}")
+    else:
+        print("    L1: no zero-width frames found (stripped?)")
+
+    if l2_conf >= 1.0:
+        print(f"    L2: {l2_bits}/{l2_needed} bits recovered (100%): {l2_candidate.hex()}")
+    elif l2_conf > 0:
+        print(f"    L2: {l2_bits}/{l2_needed} bits recovered ({l2_conf:.0%}): {l2_candidate.hex()} (partial)")
+    else:
+        print("    L2: no trailing whitespace marks found (stripped?)")
+
+    # Phase 2: Query registry for candidate mark_ids (for L3 verification)
+    registry_candidates: list[bytes] = []
+    print(f"\n[*] Phase 2: Registry query ({args.registry})")
+    if direct_candidates:
+        for m in direct_candidates:
             try:
                 resp = httpx.post(
                     f"{args.registry.rstrip('/')}/attribute",
-                    json={"mark_id": m.hex(), "layer": layer},
+                    json={"mark_id": m.hex(), "layer": "L1_zero_width"},
                     timeout=10,
                 )
                 data = resp.json()
                 if data.get("found"):
-                    print(f"\n[!!] ATTRIBUTION: mark {m.hex()} ({layer})")
-                    print(f"     file_id      = {data['file_id']}")
-                    print(f"     recipient    = {data['recipient_id']}")
-                    print(f"     issuer       = {data['issuer_id']}")
+                    print(f"    MATCH: {m.hex()} -> recipient={data['recipient_id']}, "
+                          f"file={data['file_id']}")
             except Exception as e:
-                print(f"[!] registry query failed: {e}")
+                print(f"    registry query failed: {e}")
+
+    # Also fetch all mark_ids for this file (for L3 verification)
+    try:
+        resp = httpx.get(
+            f"{args.registry.rstrip('/')}/marks",
+            timeout=10,
+        )
+        if resp.status_code == 200:
+            registry_data = resp.json()
+            for entry in registry_data.get("marks", []):
+                mid_bytes = bytes.fromhex(entry["mark_id"])
+                if mid_bytes not in registry_candidates:
+                    registry_candidates.append(mid_bytes)
+            print(f"    fetched {len(registry_candidates)} candidate mark_id(s) from registry")
+    except Exception:
+        pass  # registry may not support /marks endpoint
+
+    # Phase 3: L3 semantic verification against candidates
+    all_candidates = direct_candidates + [
+        m for m in registry_candidates if m not in direct_candidates
+    ]
+
+    print(f"\n[*] Phase 3: L3 semantic verification ({len(all_candidates)} candidate(s))")
+    if all_candidates:
+        l3_hits = watermark.verify_l3(text, all_candidates)
+        if l3_hits:
+            for mid, score, detail in l3_hits:
+                print(f"    L3 MATCH: {mid.hex()} score={score:.2f} "
+                      f"(synonyms={detail['synonyms_score']:.2f}, "
+                      f"punct={detail['punctuation_hits']}, "
+                      f"dict={detail['dict_version']})")
+        else:
+            print("    L3: no candidates matched above threshold")
+    else:
+        print("    L3: no candidates available (L1/L2 stripped, registry unreachable?)")
+
+    # Phase 4: Multi-layer fusion
+    print("\n[*] Phase 4: Multi-layer fusion")
+    result = watermark.recover_marks_v2(text, all_candidates if all_candidates else None)
+    if result["candidates"]:
+        for mark_id, score, layers in result["candidates"]:
+            print(f"    {mark_id.hex()}  score={score:.3f}  layers={layers}")
+        best = result["candidates"][0]
+        print(f"\n[!!] BEST ATTRIBUTION: {best[0].hex()}")
+        print(f"     confidence = {best[1]:.1%}")
+        print(f"     evidence   = {best[2]}")
+
+        # Final registry lookup for the winning candidate
+        try:
+            resp = httpx.post(
+                f"{args.registry.rstrip('/')}/attribute",
+                json={"mark_id": best[0].hex(), "layer": "fused"},
+                timeout=10,
+            )
+            data = resp.json()
+            if data.get("found"):
+                print(f"     file_id    = {data['file_id']}")
+                print(f"     recipient  = {data['recipient_id']}")
+                print(f"     issuer     = {data['issuer_id']}")
+        except Exception:
+            pass
+    else:
+        print("    No marks recovered from any layer.")
+        print("\n[*] Diagnostics:")
+        for d in result["diagnostics"]:
+            print(f"    {d}")
+
+    # Phase 5: Content fingerprint comparison (VM-strip-export defense)
+    if args.fingerprints:
+        print(f"\n[*] Phase 5: Content fingerprint comparison")
+        leak_fp = ContentFingerprint.from_text(text)
+        print(f"    Leak fingerprint: {len(leak_fp.winnowing_fp)} winnow hashes, "
+              f"{len(leak_fp.sentence_fp)} sentence hashes")
+
+        best_fp_match = None
+        best_fp_score = 0.0
+
+        fp_dir = Path(args.fingerprints)
+        if fp_dir.is_dir():
+            fp_files = list(fp_dir.glob("*.fingerprint.json"))
+        elif fp_dir.is_file():
+            fp_files = [fp_dir]
+        else:
+            fp_files = []
+            print(f"    [!] fingerprint path not found: {args.fingerprints}")
+
+        for fp_file in fp_files:
+            try:
+                fp_data = json.loads(fp_file.read_text())
+                stored_fp = ContentFingerprint.from_dict(fp_data["fingerprint"])
+                sim = leak_fp.similarity(stored_fp)
+                recipient_id = fp_data.get("recipient_id", "unknown")
+                mark_id = fp_data.get("mark_id", "unknown")
+
+                if sim["combined"] >= 0.1:
+                    print(f"    {fp_file.name}: recipient={recipient_id} "
+                          f"winnow={sim['winnowing']:.2f} "
+                          f"sentence={sim['sentence']:.2f} "
+                          f"combined={sim['combined']:.2f} "
+                          f"[{sim['verdict']}]")
+
+                if sim["combined"] > best_fp_score:
+                    best_fp_score = sim["combined"]
+                    best_fp_match = {
+                        "file": fp_file.name,
+                        "recipient_id": recipient_id,
+                        "mark_id": mark_id,
+                        "similarity": sim,
+                    }
+            except Exception as e:
+                print(f"    [!] error reading {fp_file.name}: {e}")
+
+        if best_fp_match and best_fp_score >= 0.3:
+            verdict = best_fp_match["similarity"]["verdict"]
+            print(f"\n[!!] FINGERPRINT ATTRIBUTION [{verdict}]:")
+            print(f"     recipient  = {best_fp_match['recipient_id']}")
+            print(f"     mark_id    = {best_fp_match['mark_id']}")
+            print(f"     confidence = {best_fp_score:.1%}")
+            print(f"     winnowing  = {best_fp_match['similarity']['winnowing']:.1%}")
+            print(f"     sentence   = {best_fp_match['similarity']['sentence']:.1%}")
+        elif fp_files:
+            print("    No fingerprint match above threshold.")
+        else:
+            print("    No fingerprint files found to compare against.")
 
 
 # ---------------- main ----------------
@@ -256,6 +434,8 @@ def main():
     a = sub.add_parser("attribute")
     a.add_argument("--leak", required=True)
     a.add_argument("--registry", required=True)
+    a.add_argument("--fingerprints", default=None,
+                   help="path to fingerprint file or directory for VM-strip detection")
 
     args = p.parse_args()
 

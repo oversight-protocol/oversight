@@ -1,28 +1,103 @@
-# Oversight v0.5
+# Oversight Protocol
 
-**Open protocol + reference implementation for data provenance, attribution, and leak detection.**
+**Open protocol for cryptographic data provenance, recipient attribution, and leak detection.**
 
-Format-agnostic. Post-quantum-verified (ML-KEM-768 + ML-DSA-65 via liboqs). Jurisdiction-aware. Fully passive — no code execution on readers, no RATs, no defensive malware.
+Co-authored by Zion Boggan and Claude Opus 4.6/4.7 (Anthropic).
 
-**Truly open source.** No cloud vendor lock-in. No paid service required. No custom cryptography. Every primitive is NIST-standardized and publicly auditable.
+Format-agnostic. Post-quantum ready (ML-KEM-768 + ML-DSA-65). Three-layer watermarking that survives format conversion, invisible-char stripping, and screenshot/OCR. Content fingerprinting that identifies leaked copies even when all watermarks are destroyed.
+
+No cloud vendor lock-in. No paid service required. No custom cryptography. Apache 2.0.
+
+**Website:** https://oversight-protocol.github.io/oversight/
 
 ---
 
-## What's new in v0.4
+## Install
 
-**Rust port expanded from core to core+enforcement+semantics.** Three new Rust crates on top of the v0.3 core:
+Requires Python 3.10+.
 
-- `oversight-tlog` — RFC 6962-compliant Merkle transparency log with signed tree heads, inclusion proofs, durable append.
-- `oversight-policy` — TOCTOU-safe max_opens enforcement, jurisdiction / not_after / not_before checks, file-id sanitization.
-- `oversight-semantic` — L3 airgap-strip-survivor watermarking with the full 151-class synonym dictionary and URL/code/path/hex/base64 skip regions.
+```bash
+# Clone the repo
+git clone https://github.com/oversight-protocol/oversight.git
+cd oversight
 
-**RFC 6962 fix in Python.** The v0.2 tlog used a promote-odd-trailing shortcut that was self-consistent but not RFC 6962 compliant — inclusion proofs wouldn't verify against Sigstore tooling. Now ported to the canonical largest-power-of-2 left-heavy split. Added `verify_inclusion_proof` helper. Tested across asymmetric tree sizes.
+# Install (adds the `oversight` command to your PATH)
+pip install .
 
-**Fuzz harness.** `cargo-fuzz` targets for container_parser and manifest_parser. Ready to run 24+ hours before a paid audit engagement.
+# Verify
+oversight status
+```
 
-**Hardware key setup guide.** `docs/HARDWARE_KEYS.md` covers YubiKey / Nitrokey / OnlyKey end-to-end — PIN/PUK setup, PIV slot provisioning, curve choice rationale, revocation, threat model, deployment checklist.
+That's it. The `oversight` command is now available globally.
 
-**Everything from v0.3 is still here.** FreeTSA RFC 3161 timestamps, cross-language conformance, Python↔Rust bit-for-bit compatibility, PQ hybrid, multi-recipient sealing, registry with signed bundles.
+### Optional extras
+
+```bash
+# Include registry server (FastAPI)
+pip install ".[registry]"
+
+# Include format adapters (PDF, DOCX, image watermarking)
+pip install ".[formats]"
+
+# Everything
+pip install ".[all]"
+```
+
+## Quick start
+
+```bash
+# 1. Initialize a project directory
+mkdir my-project && cd my-project
+oversight init
+
+# 2. Generate your issuer identity
+oversight keys generate --name zion
+
+# 3. Generate a recipient identity (they would do this on their machine)
+oversight keys generate --name alice --out alice.json
+
+# 4. Import the recipient's public key
+oversight keys import alice.pub.json
+
+# 5. Seal a document to the recipient (watermarks embedded by default)
+oversight seal report.txt --to alice
+
+# 6. The recipient opens the sealed file
+oversight open report.txt.sealed --out report-decrypted.txt
+
+# 7. If the document leaks, attribute it
+oversight attribute --leak leaked.txt --fingerprints .oversight/fingerprints
+```
+
+### What happens when you seal
+
+The seal command applies three watermark layers to the document, each targeting a different attack surface:
+
+- **L1** inserts zero-width Unicode characters (survives copy-paste)
+- **L2** encodes bits in trailing whitespace patterns (survives most editors)
+- **L3** rotates synonyms from a 151-class dictionary, adjusts punctuation style, spelling variants, and contractions (survives format conversion, invisible-char stripping, and screenshot/OCR)
+
+Then it encrypts to the recipient's X25519 public key, timestamps via RFC 3161, logs to the Merkle tree, and writes the `.sealed` file plus a `.fingerprint.json` sidecar for the content fingerprint database.
+
+### What happens when you attribute
+
+The attribute command runs a 5-phase pipeline:
+
+1. **Direct extraction** of L1/L2 marks from the leaked text
+2. **Registry query** for candidate mark IDs
+3. **L3 semantic verification** against candidates (synonym score + punctuation + spelling + contractions)
+4. **Multi-layer Bayesian fusion** combining all evidence into ranked candidates
+5. **Content fingerprint comparison** (winnowing + sentence hashing) as a last resort when all watermarks are stripped
+
+## What's new in v0.4.3
+
+**Anti-stripping defenses.** ECC-protected synonym bits (R=7 repetition codes), winnowing content fingerprints, sentence-level content hashing, 25 spelling variant pairs, 30 contraction choices, number formatting marks. The VM-strip-export attack (open in airgapped VM, strip invisible chars, export clean file) is now defended by content fingerprinting.
+
+**Rich interactive CLI.** Colorful terminal interface with progress bars, panels, config management, and streamlined commands. Run `oversight init` to get started.
+
+**L3 integration.** The 151-class synonym rotation system and punctuation fingerprinting, previously implemented but not wired into the pipeline, are now fully integrated. Multi-layer Bayesian fusion combines L1, L2, and L3 evidence.
+
+See `CHANGELOG.md` for full version history.
 
 ## Repository layout
 

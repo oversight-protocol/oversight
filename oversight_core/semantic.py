@@ -377,6 +377,189 @@ def extract_punctuation_bits(text: str) -> list[int]:
 
 
 # ------------------------------------------------------------------
+# T2b -- Spelling variants (British/American)
+# ------------------------------------------------------------------
+
+# Each pair: (American, British). Bit 0 = American, Bit 1 = British.
+SPELLING_VARIANTS = [
+    ("color", "colour"),
+    ("favor", "favour"),
+    ("honor", "honour"),
+    ("humor", "humour"),
+    ("labor", "labour"),
+    ("neighbor", "neighbour"),
+    ("behavior", "behaviour"),
+    ("organization", "organisation"),
+    ("realize", "realise"),
+    ("analyze", "analyse"),
+    ("optimize", "optimise"),
+    ("authorize", "authorise"),
+    ("recognize", "recognise"),
+    ("customize", "customise"),
+    ("minimize", "minimise"),
+    ("maximize", "maximise"),
+    ("defense", "defence"),
+    ("offense", "offence"),
+    ("license", "licence"),
+    ("catalog", "catalogue"),
+    ("program", "programme"),
+    ("center", "centre"),
+    ("meter", "metre"),
+    ("fiber", "fibre"),
+    ("theater", "theatre"),
+]
+
+# Build lookup for extraction
+_SPELLING_LOOKUP: dict[str, tuple[int, int]] = {}
+for _si, (_am, _br) in enumerate(SPELLING_VARIANTS):
+    _SPELLING_LOOKUP[_am.lower()] = (_si, 0)
+    _SPELLING_LOOKUP[_br.lower()] = (_si, 1)
+
+
+def embed_spelling(text: str, mark_id: bytes) -> str:
+    """Apply spelling variant marks keyed to mark_id bits."""
+    for si, (american, british) in enumerate(SPELLING_VARIANTS):
+        bit = _bit_for(mark_id, si + 8)  # offset by 8 to avoid collision with T2 punct
+        target = british if bit else american
+        other = american if bit else british
+        # Case-insensitive replacement preserving case
+        pattern = re.compile(re.escape(other), re.IGNORECASE)
+        text = pattern.sub(lambda m: _case_preserve(target, m.group()), text)
+    return text
+
+
+def extract_spelling_bits(text: str) -> list[tuple[int, int]]:
+    """
+    Extract spelling variant bits from text.
+    Returns list of (variant_index, bit_value) tuples.
+    """
+    found = []
+    for m in _WORD_RE.finditer(text):
+        key = m.group(1).lower()
+        if key in _SPELLING_LOOKUP:
+            si, bit = _SPELLING_LOOKUP[key]
+            found.append((si, bit))
+    return found
+
+
+# ------------------------------------------------------------------
+# T2c -- Contraction expansion/collapse
+# ------------------------------------------------------------------
+
+CONTRACTIONS = [
+    ("don't", "do not"),
+    ("doesn't", "does not"),
+    ("didn't", "did not"),
+    ("won't", "will not"),
+    ("wouldn't", "would not"),
+    ("shouldn't", "should not"),
+    ("couldn't", "could not"),
+    ("isn't", "is not"),
+    ("aren't", "are not"),
+    ("wasn't", "was not"),
+    ("weren't", "were not"),
+    ("hasn't", "has not"),
+    ("haven't", "have not"),
+    ("hadn't", "had not"),
+    ("can't", "cannot"),
+    ("it's", "it is"),
+    ("that's", "that is"),
+    ("there's", "there is"),
+    ("they're", "they are"),
+    ("we're", "we are"),
+    ("you're", "you are"),
+    ("I'm", "I am"),
+    ("he's", "he is"),
+    ("she's", "she is"),
+    ("we've", "we have"),
+    ("they've", "they have"),
+    ("I've", "I have"),
+    ("you've", "you have"),
+    ("we'll", "we will"),
+    ("they'll", "they will"),
+]
+
+
+def embed_contractions(text: str, mark_id: bytes) -> str:
+    """
+    Expand or contract eligible contractions based on mark_id bits.
+    Bit 0 = contracted form, Bit 1 = expanded form.
+    """
+    for ci, (contracted, expanded) in enumerate(CONTRACTIONS):
+        bit = _bit_for(mark_id, ci + 40)  # offset past spelling bits
+        if bit:
+            # Expand: replace contracted with expanded
+            pattern = re.compile(re.escape(contracted), re.IGNORECASE)
+            text = pattern.sub(
+                lambda m: _case_preserve(expanded, m.group()), text
+            )
+        else:
+            # Contract: replace expanded with contracted
+            pattern = re.compile(re.escape(expanded), re.IGNORECASE)
+            text = pattern.sub(
+                lambda m: _case_preserve(contracted, m.group()), text
+            )
+    return text
+
+
+def extract_contraction_bits(text: str) -> list[tuple[int, int]]:
+    """
+    Detect which form (contracted vs expanded) appears in text.
+    Returns list of (contraction_index, bit_value).
+    """
+    found = []
+    text_lower = text.lower()
+    for ci, (contracted, expanded) in enumerate(CONTRACTIONS):
+        has_contracted = contracted.lower() in text_lower
+        has_expanded = expanded.lower() in text_lower
+        if has_contracted and not has_expanded:
+            found.append((ci, 0))
+        elif has_expanded and not has_contracted:
+            found.append((ci, 1))
+    return found
+
+
+# ------------------------------------------------------------------
+# T2d -- Number formatting
+# ------------------------------------------------------------------
+
+def embed_number_format(text: str, mark_id: bytes) -> str:
+    """
+    Apply number formatting choices keyed to mark_id.
+    Bit 0: "1,000" vs "1000" (comma separator)
+    Bit 1: "50%" vs "50 percent" / "50 per cent"
+    """
+    b0 = _bit_for(mark_id, 72)
+    b1 = _bit_for(mark_id, 73)
+
+    if b0:
+        # Add comma separators to numbers >= 1000
+        def _add_commas(m):
+            n = m.group()
+            if len(n) >= 4 and "," not in n:
+                parts = []
+                while len(n) > 3:
+                    parts.append(n[-3:])
+                    n = n[:-3]
+                parts.append(n)
+                return ",".join(reversed(parts))
+            return m.group()
+        text = re.sub(r"\b\d{4,}\b", _add_commas, text)
+    else:
+        # Remove comma separators
+        text = re.sub(r"(\d),(\d{3})", r"\1\2", text)
+
+    if b1:
+        # Use "percent" word form
+        text = re.sub(r"(\d+)\s*%", r"\1 percent", text)
+    else:
+        # Use % symbol
+        text = re.sub(r"(\d+)\s+percent\b", r"\1%", text, flags=re.IGNORECASE)
+
+    return text
+
+
+# ------------------------------------------------------------------
 # Combined L3 API
 # ------------------------------------------------------------------
 
@@ -461,21 +644,34 @@ def verify_synonyms_v2(
 
 
 def apply_semantic(text: str, mark_id: bytes, use_v2: bool = True) -> str:
-    """Apply all L3 layers: synonyms (v2 by default) + punctuation."""
+    """
+    Apply all L3 layers: synonyms + punctuation + spelling + contractions + numbers.
+
+    This is the full semantic watermark embedding. Every mark type survives
+    format conversion and invisible-character stripping.
+    """
     if use_v2 and SYNONYMS_V2_AVAILABLE:
         t = embed_synonyms_v2(text, mark_id)
     else:
         t = embed_synonyms(text, mark_id)
     t = embed_punctuation(t, mark_id)
+    t = embed_spelling(t, mark_id)
+    t = embed_contractions(t, mark_id)
+    t = embed_number_format(t, mark_id)
     return t
 
 
 def verify_semantic(text: str, candidate_mark_id: bytes, use_v2: bool = True) -> dict:
-    """Check whether text matches candidate_mark_id. Returns per-sublayer scores."""
+    """
+    Check whether text matches candidate_mark_id across all semantic sublayers.
+    Returns per-sublayer scores and an overall match verdict.
+    """
     if use_v2 and SYNONYMS_V2_AVAILABLE:
         syn_match, syn_score = verify_synonyms_v2(text, candidate_mark_id)
     else:
         syn_match, syn_score = verify_synonyms_match(text, candidate_mark_id)
+
+    # Punctuation
     punct_bits = extract_punctuation_bits(text)
     expected_punct = [
         _bit_for(candidate_mark_id, 0),
@@ -486,11 +682,64 @@ def verify_semantic(text: str, candidate_mark_id: bytes, use_v2: bool = True) ->
     punct_total = len(punct_bits)
     punct_score = punct_hits / punct_total if punct_total else 0.0
 
+    # Spelling variants
+    spelling_bits = extract_spelling_bits(text)
+    spelling_hits = 0
+    spelling_total = len(spelling_bits)
+    for si, actual_bit in spelling_bits:
+        expected_bit = _bit_for(candidate_mark_id, si + 8)
+        if actual_bit == expected_bit:
+            spelling_hits += 1
+    spelling_score = spelling_hits / spelling_total if spelling_total else 0.0
+
+    # Contractions
+    contraction_bits = extract_contraction_bits(text)
+    contraction_hits = 0
+    contraction_total = len(contraction_bits)
+    for ci, actual_bit in contraction_bits:
+        expected_bit = _bit_for(candidate_mark_id, ci + 40)
+        if actual_bit == expected_bit:
+            contraction_hits += 1
+    contraction_score = (
+        contraction_hits / contraction_total if contraction_total else 0.0
+    )
+
+    # Weighted overall: synonyms are the primary signal, others are supplementary
+    weights = {"syn": 0.50, "punct": 0.10, "spell": 0.20, "contract": 0.20}
+    scores = {
+        "syn": syn_score,
+        "punct": punct_score,
+        "spell": spelling_score,
+        "contract": contraction_score,
+    }
+    active_weight = sum(
+        w for k, w in weights.items()
+        if (k == "syn" or (k == "punct" and punct_total)
+            or (k == "spell" and spelling_total)
+            or (k == "contract" and contraction_total))
+    )
+    if active_weight > 0:
+        weighted_score = sum(
+            scores[k] * weights[k] for k in weights
+            if (k == "syn" or (k == "punct" and punct_total)
+                or (k == "spell" and spelling_total)
+                or (k == "contract" and contraction_total))
+        ) / active_weight
+    else:
+        weighted_score = syn_score
+
+    overall_match = weighted_score >= 0.65
+
     return {
         "synonyms_match": syn_match,
         "synonyms_score": syn_score,
         "punctuation_score": punct_score,
         "punctuation_hits": f"{punct_hits}/{punct_total}",
-        "overall_match": syn_match and (punct_score >= 0.5 if punct_total else True),
+        "spelling_score": spelling_score,
+        "spelling_hits": f"{spelling_hits}/{spelling_total}",
+        "contraction_score": contraction_score,
+        "contraction_hits": f"{contraction_hits}/{contraction_total}",
+        "weighted_score": weighted_score,
+        "overall_match": overall_match,
         "dict_version": "v2" if (use_v2 and SYNONYMS_V2_AVAILABLE) else "v1",
     }

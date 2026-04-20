@@ -20,11 +20,12 @@ Layers:
       cleaning than L1 because linters often don't touch trailing whitespace in
       content-bearing fields.
 
-  L3 (synonym rotation, stub):
-      Placeholder for semantic watermarking — swap between {start/begin/commence}
-      style synonym classes per-bit. Survives format conversion completely because
-      the mark is in the *words chosen*. Real implementation needs an NLP pass;
-      the stub here demonstrates the hook.
+  L3 (synonym rotation + punctuation):
+      Semantic watermarking via synonym-class rotation (151 classes in v2) and
+      punctuation-style fingerprinting (Oxford comma, em dash, curly quotes).
+      Survives format conversion, invisible-char stripping, and whitespace
+      normalization because the marks are in the words and punctuation chosen.
+      Implementation in oversight_core.semantic; wired in here via apply_all.
 
 Future (not in MVP):
   - Visual DCT-domain watermarks for images (robust to recompression + screenshot)
@@ -161,38 +162,70 @@ def extract_ws(text: str, mark_len_bytes: int = 8) -> Optional[bytes]:
     return _bytes_from_bits(bits[:needed])
 
 
-# ---------------- L3: synonym-class (stub) ----------------
+# ---------------- L3: semantic watermarking ----------------
 
-# Illustrative only. Real deployment needs a curated synonym table + NLP-aware insertion.
-SYNONYM_CLASSES = [
-    ("begin", "start", "commence"),    # 3-ary, encodes log2(3) ≈ 1.58 bits
-    ("large", "big", "substantial"),
-    ("fast", "quick", "rapid"),
-    ("show", "display", "present"),
-]
+# Real implementation lives in oversight_core.semantic. We import it here
+# so the watermark module is the single entry point for all three layers.
+try:
+    from . import semantic as _semantic
+    _L3_AVAILABLE = True
+except ImportError:
+    _L3_AVAILABLE = False
 
 
-def embed_synonyms_stub(text: str, mark_id: bytes) -> str:
+# ---------------- L2: partial recovery ----------------
+
+def extract_ws_partial(
+    text: str, mark_len_bytes: int = 8
+) -> tuple[Optional[bytes], float, int, int]:
     """
-    Stub: demonstrates the hook. A production version walks the text with an NLP
-    tagger, finds matches in SYNONYM_CLASSES, and rotates them deterministically
-    based on bits of mark_id.
+    Like extract_ws but returns partial results with confidence.
+
+    Returns:
+      (best_candidate, confidence, bits_recovered, bits_needed)
+
+    If all bits are recovered, confidence = 1.0 and best_candidate is exact.
+    If partial, best_candidate has recovered bits filled in and unknown bits
+    set to 0, confidence = bits_recovered / bits_needed.
     """
-    # Deliberately a no-op placeholder — clearly flagged so it's not mistaken for real.
-    return text
+    needed = mark_len_bytes * 8
+    bits: list[int] = []
+    for line in text.split("\n"):
+        if line.endswith(" "):
+            bits.append(0)
+        elif line.endswith("\t"):
+            bits.append(1)
+        if len(bits) >= needed:
+            break
 
+    recovered = len(bits)
+    if recovered == 0:
+        return None, 0.0, 0, needed
 
-def extract_synonyms_stub(text: str) -> Optional[bytes]:
-    return None
+    # Pad with zeros if incomplete
+    padded = bits[:needed] + [0] * max(0, needed - recovered)
+    candidate = _bytes_from_bits(padded[:needed])
+    confidence = min(recovered, needed) / needed
+    return candidate, confidence, min(recovered, needed), needed
 
 
 # ---------------- high-level apply/recover ----------------
 
 def apply_all(text: str, mark_id: bytes) -> str:
-    """Apply all available watermark layers to text."""
-    t = embed_zw(text, mark_id)
+    """
+    Apply all available watermark layers to text.
+
+    Layer order matters: L3 (synonym rotation) runs FIRST because it rewrites
+    words. L2 (trailing whitespace) runs second. L1 (zero-width unicode) runs
+    last because it inserts invisible characters that could fragment synonym
+    words if applied earlier.
+    """
+    if _L3_AVAILABLE:
+        t = _semantic.apply_semantic(text, mark_id)
+    else:
+        t = text
     t = embed_ws(t, mark_id)
-    t = embed_synonyms_stub(t, mark_id)
+    t = embed_zw(t, mark_id)
     return t
 
 
@@ -204,5 +237,175 @@ def recover_marks(text: str, mark_len_bytes: int = 8) -> dict:
     return {
         "L1_zero_width": extract_zw(text, mark_len_bytes),
         "L2_whitespace": [m for m in [extract_ws(text, mark_len_bytes)] if m],
-        "L3_synonyms": [m for m in [extract_synonyms_stub(text)] if m],
+        "L3_synonyms": [],  # L3 requires candidate-based verification; see verify_l3
     }
+
+
+def verify_l3(
+    text: str,
+    candidate_mark_ids: list[bytes],
+    threshold: float = 0.70,
+) -> list[tuple[bytes, float, dict]]:
+    """
+    Test candidate mark_ids against the semantic marks in text.
+
+    Returns a list of (mark_id, score, detail_dict) for candidates that
+    score above the threshold. Results are sorted by score descending.
+    """
+    if not _L3_AVAILABLE:
+        return []
+
+    hits = []
+    for mid in candidate_mark_ids:
+        detail = _semantic.verify_semantic(text, mid)
+        if detail["overall_match"]:
+            hits.append((mid, detail["synonyms_score"], detail))
+    hits.sort(key=lambda x: x[1], reverse=True)
+    return hits
+
+
+def recover_marks_v2(
+    text: str,
+    candidate_mark_ids: list[bytes] | None = None,
+    mark_len_bytes: int = 8,
+) -> dict:
+    """
+    Enhanced recovery with partial L2, L3 verification, and per-layer diagnostics.
+
+    Returns a dict with:
+      - layers: per-layer results with confidence
+      - candidates: fused candidate list
+      - diagnostics: human-readable per-layer status strings
+    """
+    # L1: zero-width extraction
+    l1_marks = extract_zw(text, mark_len_bytes)
+    l1_unique = list(set(l1_marks))
+
+    # L2: partial recovery
+    l2_candidate, l2_confidence, l2_bits, l2_needed = extract_ws_partial(
+        text, mark_len_bytes
+    )
+    l2_marks = [l2_candidate] if l2_candidate and l2_confidence >= 0.5 else []
+
+    # L3: candidate-based verification
+    l3_hits: list[tuple[bytes, float, dict]] = []
+    if candidate_mark_ids and _L3_AVAILABLE:
+        l3_hits = verify_l3(text, candidate_mark_ids)
+
+    # Build diagnostics
+    diagnostics = []
+    if l1_unique:
+        diagnostics.append(
+            f"L1: {len(l1_marks)} frames found, "
+            f"{len(l1_unique)} unique mark(s): "
+            + ", ".join(m.hex() for m in l1_unique)
+        )
+    else:
+        diagnostics.append(
+            "L1: 0 zero-width frames found (invisible chars stripped?)"
+        )
+
+    if l2_confidence >= 1.0:
+        diagnostics.append(
+            f"L2: {l2_bits}/{l2_needed} bits recovered (100%), "
+            f"mark: {l2_candidate.hex()}"
+        )
+    elif l2_confidence > 0:
+        diagnostics.append(
+            f"L2: {l2_bits}/{l2_needed} bits recovered "
+            f"({l2_confidence:.0%} confidence), "
+            f"partial candidate: {l2_candidate.hex()}"
+        )
+    else:
+        diagnostics.append(
+            "L2: 0 trailing whitespace marks found (whitespace stripped?)"
+        )
+
+    if not _L3_AVAILABLE:
+        diagnostics.append("L3: semantic module not available")
+    elif not candidate_mark_ids:
+        diagnostics.append(
+            "L3: no candidate mark_ids provided (query registry first)"
+        )
+    elif l3_hits:
+        for mid, score, detail in l3_hits:
+            diagnostics.append(
+                f"L3: mark {mid.hex()} matched with score "
+                f"{score:.2f} (synonyms) / "
+                f"{detail['punctuation_hits']} (punctuation), "
+                f"dict={detail['dict_version']}"
+            )
+    else:
+        diagnostics.append(
+            f"L3: {len(candidate_mark_ids)} candidate(s) tested, "
+            "none matched above threshold"
+        )
+
+    # Fuse candidates across layers
+    all_candidates = _fuse_candidates(
+        l1_unique, l2_candidate, l2_confidence, l3_hits
+    )
+
+    return {
+        "layers": {
+            "L1_zero_width": l1_unique,
+            "L2_whitespace": l2_marks,
+            "L2_confidence": l2_confidence,
+            "L3_semantic": [(m, s) for m, s, _ in l3_hits],
+        },
+        "candidates": all_candidates,
+        "diagnostics": diagnostics,
+    }
+
+
+def _fuse_candidates(
+    l1_marks: list[bytes],
+    l2_candidate: bytes | None,
+    l2_confidence: float,
+    l3_hits: list[tuple[bytes, float, dict]],
+) -> list[tuple[bytes, float, str]]:
+    """
+    Multi-layer Bayesian fusion: combine evidence from all layers into a
+    single ranked candidate list.
+
+    Returns list of (mark_id, combined_score, evidence_summary).
+
+    Scoring:
+      - L1 exact match: 0.95 (high, but not 1.0 because of frame corruption)
+      - L2 exact match: 0.90 (slightly lower, whitespace is fragile)
+      - L2 partial: l2_confidence * 0.60 (scaled down for uncertainty)
+      - L3 match: l3_score * 0.85 (probabilistic, weighted by synonym score)
+
+    When multiple layers agree on the same mark_id, scores combine:
+      combined = 1 - (1-s1)(1-s2)...(1-sN)
+    This is a standard independence-assumption combination.
+    """
+    # Collect per-candidate evidence
+    evidence: dict[bytes, list[tuple[float, str]]] = {}
+
+    for m in l1_marks:
+        evidence.setdefault(m, []).append((0.95, "L1"))
+
+    if l2_candidate and l2_confidence >= 0.5:
+        l2_score = min(l2_confidence, 1.0) * 0.90
+        evidence.setdefault(l2_candidate, []).append((l2_score, "L2"))
+
+    for m, s, _ in l3_hits:
+        evidence.setdefault(m, []).append((s * 0.85, "L3"))
+
+    # Combine scores per candidate
+    results = []
+    for mark_id, scores in evidence.items():
+        if len(scores) == 1:
+            combined = scores[0][0]
+        else:
+            # 1 - product(1 - s_i)
+            combined = 1.0
+            for s, _ in scores:
+                combined *= (1.0 - s)
+            combined = 1.0 - combined
+        layers_hit = "+".join(lbl for _, lbl in scores)
+        results.append((mark_id, combined, layers_hit))
+
+    results.sort(key=lambda x: x[1], reverse=True)
+    return results
