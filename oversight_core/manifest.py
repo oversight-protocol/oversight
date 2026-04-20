@@ -45,6 +45,7 @@ class Manifest:
     # file properties
     original_filename: str = ""
     content_hash: str = ""             # sha256 of plaintext
+    canonical_content_hash: str = ""   # sha256 of source before semantic/L1/L2 marks
     content_type: str = "application/octet-stream"
     size_bytes: int = 0
 
@@ -61,6 +62,7 @@ class Manifest:
 
     # policy
     policy: dict = field(default_factory=dict)
+    l3_policy: dict = field(default_factory=dict)
     # policy fields (opt):
     #   not_after: int (unix)
     #   max_opens: int
@@ -103,6 +105,7 @@ class Manifest:
             issued_at=int(time.time()),
             original_filename=original_filename,
             content_hash=content_hash,
+            canonical_content_hash=content_hash,
             content_type=content_type,
             size_bytes=size_bytes,
             issuer_id=issuer_id,

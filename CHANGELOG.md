@@ -1,5 +1,31 @@
 # Oversight CHANGELOG
 
+## v0.4.5 - 2026-04-20 L3 safety, GUI, and registry federation docs
+
+Review-driven hardening from `P:/Oversight/oversight-protocol-review.md`.
+
+- `oversight_core/l3_policy.py`: new L3 safety policy engine. L3 defaults off
+  for legal, regulatory, technical/spec, source-code, SQL, log, and structured
+  data classes; explicit `full`, `boilerplate`, and `off` modes are supported.
+- `cli/oversight.py` and `cli/oversight_rich.py`: seal-time L3 disclosure now
+  requires acknowledgement when L3 is enabled, and seal manifests record the
+  applied L3 policy.
+- `oversight_core/manifest.py`: manifests now carry `canonical_content_hash`
+  so auditors can diff recipient copies against the original source bytes.
+- `oversight_core/watermark.py` and `oversight_core/formats/text.py`: high-level
+  L3 application is opt-in; L1/L2 remain available by default.
+- `cli/gui.py`: added a Tkinter desktop GUI for key generation, sealing, and
+  opening files (`oversight gui`) so non-technical users have a starter path.
+- `docs/security.md`: documented L3 collusion/canonicalization limits, layer
+  survival properties, passive beacon limits, jurisdiction-by-IP limits, and
+  RFC 3161 timestamp semantics.
+- `docs/spec/registry-v1.md`: added a registry federation/interoperability
+  draft for independent compatible registry operators.
+- `docs/ROADMAP.md`: corrected launch sequencing, dropped near-term FedRAMP,
+  scoped ecosystem plugins to Outlook-first, and prioritized SIEM integration
+  before SOC 2 / ISO 27001 work.
+- Added focused regression coverage in `tests/test_l3_policy_unit.py`.
+
 ## v0.4.4 - 2026-04-20 security hardening
 
 Security patch line started from the `v0.4.3` Python package baseline

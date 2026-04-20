@@ -14,7 +14,7 @@ Core:
 from .container import seal, open_sealed, SealedFile
 from .manifest import Manifest, Recipient, WatermarkRef
 from .crypto import ClassicIdentity, random_dek, content_hash
-from . import watermark, beacon
+from . import watermark, beacon, l3_policy
 
 __all__ = [
     "seal",
@@ -28,6 +28,7 @@ __all__ = [
     "content_hash",
     "watermark",
     "beacon",
+    "l3_policy",
 ]
 
-__version__ = "0.4.4"
+__version__ = "0.4.5"

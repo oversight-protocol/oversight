@@ -256,6 +256,11 @@ def iter_matchable_words(text: str) -> Iterator[tuple[int, int, str, tuple[int, 
         # Skip if any part of the word is inside a skip region
         if any(skip_mask[i] for i in range(m.start(), m.end())):
             continue
+        # Conservative L3 safety: do not alter ALL-CAPS defined terms or
+        # capitalized words that may be proper nouns.
+        word = m.group(1)
+        if word.isupper() or (word[:1].isupper() and m.start() != 0):
+            continue
         key = m.group(1).lower()
         if key in _LOOKUP:
-            yield m.start(), m.end(), m.group(1), _LOOKUP[key]
+            yield m.start(), m.end(), word, _LOOKUP[key]

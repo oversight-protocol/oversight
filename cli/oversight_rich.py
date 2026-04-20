@@ -45,17 +45,17 @@ from oversight_core import (
     open_sealed,
     beacon,
     watermark,
+    l3_policy,
     __version__ as core_version,
 )
 from oversight_core.container import SealedFile
-from oversight_core import semantic
 from oversight_core.fingerprint import ContentFingerprint
 
 # ---------------------------------------------------------------------------
 # Constants
 # ---------------------------------------------------------------------------
 
-CLI_VERSION = "0.4.4"
+CLI_VERSION = "0.4.5"
 CONFIG_FILENAME = "config.json"
 CONFIG_DIR_NAME = ".oversight"
 
@@ -511,9 +511,11 @@ def cmd_seal(args):
     do_watermark = args.watermark if args.watermark is not None else cfg.get("default_watermark", True)
     content_type_val = args.content_type or cfg.get("content_type", "application/octet-stream")
 
+    canonical_plaintext = plaintext
     watermarks_for_manifest: list[WatermarkRef] = []
     fingerprint = None
     mark_id = None
+    l3_decision = None
 
     # Run the seal pipeline with progress
     with Progress(
@@ -537,9 +539,35 @@ def cmd_seal(args):
 
             if text is not None:
                 mark_id = watermark.new_mark_id()
+                l3_decision = l3_policy.decide_l3(
+                    filename=str(input_path),
+                    content_type=content_type_val,
+                    text=text,
+                    declared_class=args.document_class,
+                    requested_mode=args.l3_mode,
+                )
 
-                progress.update(task, description="Watermarking L3 (semantic)...")
-                text = semantic.apply_semantic(text, mark_id)
+                progress.update(task, description="Evaluating L3 safety policy...")
+                if l3_decision.enabled:
+                    progress.stop()
+                    if not args.l3_ack:
+                        console.print(Panel(
+                            "L3 semantic watermarking changes visible prose. "
+                            f"Class: [bold]{l3_decision.document_class}[/], "
+                            f"mode: [bold]{l3_decision.mode}[/].\n\n"
+                            "Enable only when you accept that the recipient copy "
+                            "is textually non-identical to the canonical source.",
+                            title="[yellow]L3 Disclosure[/]",
+                            border_style="yellow",
+                        ))
+                        if not Confirm.ask("Acknowledge and apply L3?", default=False):
+                            error_panel("L3 not acknowledged. Re-run with --l3-mode off or --l3-ack.")
+                            sys.exit(1)
+                    progress.start()
+                    progress.update(task, description=f"Watermarking L3 ({l3_decision.mode})...")
+                    text = l3_policy.apply_l3_safe(text, mark_id, mode=l3_decision.mode)
+                else:
+                    progress.update(task, description=f"Skipping L3: {l3_decision.document_class}")
                 progress.advance(task)
 
                 progress.update(task, description="Watermarking L2 (whitespace)...")
@@ -554,8 +582,11 @@ def cmd_seal(args):
                 watermarks_for_manifest = [
                     WatermarkRef(layer="L1_zero_width", mark_id=mark_id.hex()),
                     WatermarkRef(layer="L2_whitespace", mark_id=mark_id.hex()),
-                    WatermarkRef(layer="L3_semantic", mark_id=mark_id.hex()),
                 ]
+                if l3_decision and l3_decision.enabled:
+                    watermarks_for_manifest.append(
+                        WatermarkRef(layer=f"L3_semantic_{l3_decision.mode}", mark_id=mark_id.hex())
+                    )
 
         # Step 4: Build manifest
         progress.update(task, description="Building manifest...")
@@ -581,6 +612,9 @@ def cmd_seal(args):
             registry_url=registry_url,
             content_type=content_type_val,
         )
+        manifest.canonical_content_hash = content_hash(canonical_plaintext)
+        if l3_decision:
+            manifest.l3_policy = l3_decision.to_dict()
         manifest.watermarks = watermarks_for_manifest
         manifest.beacons = [b.to_dict() for b in beacons]
         progress.advance(task)
@@ -614,6 +648,8 @@ def cmd_seal(args):
                 "file_id": manifest.file_id,
                 "recipient_id": rec_pub["id"],
                 "mark_id": mark_id.hex() if mark_id else None,
+                "canonical_content_hash": manifest.canonical_content_hash,
+                "l3_policy": manifest.l3_policy,
                 "fingerprint": fingerprint.to_dict(),
             }, indent=2))
 
@@ -629,6 +665,8 @@ def cmd_seal(args):
     table.add_row("Issuer", issuer_id)
     table.add_row("Recipient", rec_pub["id"])
     table.add_row("Watermarks", str(len(watermarks_for_manifest)))
+    if l3_decision:
+        table.add_row("L3 policy", f"{l3_decision.mode} ({l3_decision.document_class})")
     table.add_row("Beacons", str(len(beacons)))
     table.add_row("Suite", "OSGT-CLASSIC-v1")
     if mark_id:
@@ -1257,6 +1295,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p.add_argument("--no-banner", action="store_true", help="suppress startup banner")
     sub = p.add_subparsers(dest="cmd")
+    sub.add_parser("gui", help="launch the graphical desktop app")
 
     # init
     init_p = sub.add_parser("init", help="initialize .oversight/ directory")
@@ -1292,6 +1331,15 @@ def build_parser() -> argparse.ArgumentParser:
     seal_p.add_argument("--content-type", default=None, help="MIME content type")
     seal_p.add_argument("--watermark", default=None, action="store_true", help="embed watermarks (default from config)")
     seal_p.add_argument("--no-watermark", dest="watermark", action="store_false", help="skip watermarks")
+    seal_p.add_argument("--l3-mode", choices=("auto", "off", "full", "boilerplate"), default="auto",
+                        help="semantic L3 mode; auto disables L3 for wording-sensitive documents")
+    seal_p.add_argument("--l3-ack", action="store_true",
+                        help="acknowledge enabled L3 makes recipient text non-identical")
+    seal_p.add_argument("--document-class",
+                        choices=("auto", "prose", "legal", "regulatory", "technical_spec",
+                                 "source_code", "sql", "log", "structured_data"),
+                        default="auto",
+                        help="declare document class for L3 safety decisions")
     seal_p.add_argument("--register", default=None, help="POST manifest to this registry URL")
 
     # open
@@ -1342,6 +1390,11 @@ def main():
             print_banner()
         parser.print_help()
         sys.exit(0)
+
+    if args.cmd == "gui":
+        from cli.gui import main as gui_main
+        gui_main()
+        return
 
     if show_banner:
         print_banner()

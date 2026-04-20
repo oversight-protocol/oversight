@@ -22,10 +22,10 @@ def t1_text_adapter_matches_core_order():
         "A second paragraph helps the semantic watermark choose visible variants."
     )
     mark_id = watermark.new_mark_id()
-    via_adapter = text_format.apply(original, mark_id)
-    via_core = watermark.apply_all(original, mark_id)
+    via_adapter = text_format.apply(original, mark_id, layers=("L1", "L2", "L3"))
+    via_core = watermark.apply_all(original, mark_id, include_l3=True)
     assert via_adapter == via_core, "text adapter diverged from core watermark order"
-    print("  [PASS] text adapter applies L3/L2/L1 in the same order as the core pipeline")
+    print("  [PASS] text adapter applies explicit L3/L2/L1 in the same order as the core pipeline")
 
 
 def main():

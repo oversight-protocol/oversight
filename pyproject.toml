@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "oversight-protocol"
-version = "0.4.4"
+version = "0.4.5"
 description = "Open protocol for cryptographic data provenance, recipient attribution, and leak detection."
 readme = "README.md"
 license = {text = "Apache-2.0"}
@@ -53,6 +53,7 @@ all = ["oversight-protocol[registry,formats]"]
 
 [project.scripts]
 oversight = "cli.oversight_rich:main"
+oversight-gui = "cli.gui:main"
 
 [project.urls]
 Homepage = "https://oversight-protocol.github.io/oversight/"

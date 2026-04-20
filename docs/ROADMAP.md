@@ -1,5 +1,25 @@
 # Oversight Roadmap
 
+## April 20, 2026 correction
+
+The launch plan is now gated on product usability and threat-model honesty:
+
+1. **L3 safety fixes and collusion docs** - shipped in v0.4.5: L3 defaults off for wording-sensitive document classes, requires explicit disclosure when enabled, records `canonical_content_hash`, and supports a boilerplate-only mode.
+2. **Web viewer / drag-drop share UI** - next website/product milestone. Do not launch broadly on HN/Reddit until non-technical recipients can open and inspect Oversight files without the CLI.
+3. **Outlook add-in only** for the first ecosystem integration. Defer Drive, Box, SharePoint, and Teams plugins until there is a maintainer or design partner paying for them.
+4. **SIEM integration before SOC 2**: prioritize Splunk HEC, Microsoft Sentinel, and Elastic Common Schema exports because they are fast and high enterprise ROI.
+5. **SOC 2 Type 1 scoping** is realistic after a design partner. ISO 27001 comes after SOC 2. **FedRAMP is dropped from near-term planning**; it is a multi-year commercial program requiring sponsor-agency backing.
+6. **Registry federation**: publish and harden `docs/spec/registry-v1.md` during the Rust Axum/SQLx registry work so a second operator can run a compatible registry.
+
+Correct public-launch sequence:
+
+1. L3 safety + collusion documentation.
+2. GUI / web viewer / drag-drop share workflow.
+3. Outlook add-in.
+4. One regulated-industry design partner deployment.
+5. SOC 2 Type 1 scoping in parallel.
+6. Public launch after the above, not while CLI-only.
+
 This roadmap tracks work that lives outside a single release cut: external
 integrations, spec publication, third-party review, and community milestones.
 Every item references real upstream projects with current links so the plan

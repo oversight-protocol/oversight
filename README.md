@@ -4,7 +4,7 @@
 
 Co-authored by Zion Boggan and Claude Opus 4.6/4.7 (Anthropic) and Codex ChatGPT-5-4 (OpenAI).
 
-Format-agnostic. Post-quantum ready (ML-KEM-768 + ML-DSA-65). Three-layer watermarking that survives format conversion, invisible-char stripping, and screenshot/OCR. Content fingerprinting that identifies leaked copies even when all watermarks are destroyed.
+Format-agnostic. Post-quantum ready (ML-KEM-768 + ML-DSA-65). Layered watermarking with honest limits: L1/L2 are lightweight steganographic signals, L3 is opt-in semantic marking for prose, and content fingerprinting helps identify leaked copies even when fragile marks are destroyed.
 
 No cloud vendor lock-in. No paid service required. No custom cryptography. Apache 2.0.
 
@@ -71,11 +71,13 @@ oversight attribute --leak leaked.txt --fingerprints .oversight/fingerprints
 
 ### What happens when you seal
 
-The seal command applies three watermark layers to the document, each targeting a different attack surface:
+The seal command applies watermark layers to the document, each targeting a different attack surface:
 
 - **L1** inserts zero-width Unicode characters (survives copy-paste)
 - **L2** encodes bits in trailing whitespace patterns (survives most editors)
-- **L3** rotates synonyms from a 151-class dictionary, adjusts punctuation style, spelling variants, and contractions (survives format conversion, invisible-char stripping, and screenshot/OCR)
+- **L3** optionally rotates prose choices from a 151-class dictionary (survives format conversion and screenshot/OCR, but changes visible text and can be defeated by motivated collusion/canonicalization)
+
+L3 defaults off for legal documents, regulatory filings, technical specifications, source code, SQL, logs, and structured data. When L3 is enabled, Oversight asks for explicit acknowledgement and records `canonical_content_hash` in the signed manifest so disputes can compare the recipient copy against the canonical source.
 
 Then it encrypts to the recipient's X25519 public key, timestamps via RFC 3161, logs to the Merkle tree, and writes the `.sealed` file plus a `.fingerprint.json` sidecar for the content fingerprint database.
 
@@ -92,6 +94,20 @@ The attribute command runs a 5-phase pipeline:
 3. **L3 semantic verification** against candidates (synonym score + punctuation + spelling + contractions)
 4. **Multi-layer Bayesian fusion** combining all evidence into ranked candidates
 5. **Content fingerprint comparison** (winnowing + sentence hashing) as a last resort when all watermarks are stripped
+
+## What's new in v0.4.5
+
+**L3 safety and usability.** Semantic watermarking is now format-aware and
+opt-in for sensitive classes, with full/boilerplate/off modes, disclosure
+acknowledgement, canonical source hashing, protected-region skips, and explicit
+collusion/threat-model documentation in `docs/security.md`.
+
+**GUI starter.** `oversight gui` launches a small desktop app for key
+generation, sealing, and opening files so non-technical recipients are not
+forced through the CLI.
+
+**Registry federation draft.** `docs/spec/registry-v1.md` documents the
+interoperability contract for compatible registry operators.
 
 ## What's new in v0.4.4
 
@@ -121,7 +137,7 @@ See `CHANGELOG.md` for full version history.
 
 ## Security hardening
 
-These items are included in v0.4.4 and current `main`:
+These items are included in v0.4.4/v0.4.5 and current `main`:
 
 - `max_opens` now counts only successful recipient decryptions, not failed key guesses.
 - `LOCAL_ONLY` open counters now work on Windows as well as POSIX hosts.
@@ -135,6 +151,8 @@ These items are included in v0.4.4 and current `main`:
   authenticated DNS beacon callbacks, no silent signed-artifact drops,
   digest-checked Rekor offline verification, fail-closed Rust `max_opens`,
   DOCX keyword insertion, and PDF action screening.
+- L3 semantic watermarking is opt-in for sensitive classes, requires
+  disclosure acknowledgement when enabled, and records `canonical_content_hash`.
 
 ## Repository layout
 

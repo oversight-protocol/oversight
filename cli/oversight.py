@@ -44,6 +44,7 @@ from oversight_core import (
     open_sealed,
     beacon,
     watermark,
+    l3_policy,
 )
 from oversight_core.container import SealedFile
 from oversight_core import semantic
@@ -80,8 +81,11 @@ def cmd_seal(args):
     issuer = json.loads(Path(args.issuer_key).read_text())
     rec_pub = json.loads(Path(args.recipient_pub).read_text())
 
+    canonical_plaintext = plaintext
+
     # Optional watermarking (text files only)
     watermarks_for_manifest: list[WatermarkRef] = []
+    l3_decision = None
     if args.watermark:
         try:
             text = plaintext.decode("utf-8")
@@ -94,11 +98,25 @@ def cmd_seal(args):
             # attribution (one ID per recipient, not one per layer).
             mark_id = watermark.new_mark_id()
 
-            # Apply layers in correct order: L3 first (rewrites words),
-            # then L2 (trailing whitespace), then L1 (zero-width chars).
-            # This prevents L1's invisible chars from fragmenting L3 synonym
-            # words during embedding.
-            text = semantic.apply_semantic(text, mark_id)
+            l3_decision = l3_policy.decide_l3(
+                filename=args.input,
+                content_type=args.content_type,
+                text=text,
+                declared_class=args.document_class,
+                requested_mode=args.l3_mode,
+            )
+
+            if l3_decision.enabled:
+                if not args.l3_ack and not _confirm_l3(l3_decision):
+                    raise SystemExit(
+                        "L3 changes visible text. Re-run with --l3-mode off, "
+                        "--l3-mode boilerplate, or --l3-ack to acknowledge."
+                    )
+                text = l3_policy.apply_l3_safe(text, mark_id, mode=l3_decision.mode)
+                watermarks_for_manifest.append(WatermarkRef(
+                    layer=f"L3_semantic_{l3_decision.mode}", mark_id=mark_id.hex()
+                ))
+
             text = watermark.embed_ws(text, mark_id)
             text = watermark.embed_zw(text, mark_id)
             plaintext = text.encode("utf-8")
@@ -109,12 +127,12 @@ def cmd_seal(args):
             watermarks_for_manifest.append(WatermarkRef(
                 layer="L2_whitespace", mark_id=mark_id.hex()
             ))
-            watermarks_for_manifest.append(WatermarkRef(
-                layer="L3_semantic", mark_id=mark_id.hex()
-            ))
             print(f"[+] embedded L1 mark {mark_id.hex()}")
             print(f"[+] embedded L2 mark {mark_id.hex()}")
-            print(f"[+] embedded L3 mark {mark_id.hex()} (semantic + punctuation)")
+            if l3_decision and l3_decision.enabled:
+                print(f"[+] embedded L3 mark {mark_id.hex()} ({l3_decision.mode})")
+            elif l3_decision:
+                print(f"[!] L3 skipped: {l3_decision.reason} ({'; '.join(l3_decision.warnings)})")
 
     # Recipient
     recipient = Recipient(
@@ -140,6 +158,9 @@ def cmd_seal(args):
         registry_url=args.registry_url,
         content_type=args.content_type,
     )
+    manifest.canonical_content_hash = content_hash(canonical_plaintext)
+    if l3_decision:
+        manifest.l3_policy = l3_decision.to_dict()
     manifest.watermarks = watermarks_for_manifest
     manifest.beacons = [b.to_dict() for b in beacons]
 
@@ -175,6 +196,8 @@ def cmd_seal(args):
             "file_id": manifest.file_id,
             "recipient_id": rec_pub["id"],
             "mark_id": watermarks_for_manifest[0].mark_id if watermarks_for_manifest else None,
+            "canonical_content_hash": manifest.canonical_content_hash,
+            "l3_policy": manifest.l3_policy,
             "fingerprint": fingerprint.to_dict(),
         }, indent=2))
         print(f"[+] wrote fingerprint to {fp_path}")
@@ -216,6 +239,16 @@ def cmd_open(args):
     print(f"[+] recipient = {manifest.recipient.recipient_id if manifest.recipient else '?'}")
     print(f"[+] marks     = {len(manifest.watermarks)}")
     print(f"[+] beacons   = {len(manifest.beacons)}")
+
+
+def _confirm_l3(decision) -> bool:
+    print("[!] L3 semantic watermarking changes visible prose.")
+    print(f"    document_class={decision.document_class} mode={decision.mode}")
+    print(f"    reason={decision.reason}")
+    if not sys.stdin.isatty():
+        return False
+    answer = input("    Type 'I ACKNOWLEDGE' to continue: ").strip()
+    return answer == "I ACKNOWLEDGE"
 
 
 # ---------------- inspect ----------------
@@ -421,6 +454,15 @@ def main():
     s.add_argument("--out", required=True)
     s.add_argument("--content-type", default="application/octet-stream")
     s.add_argument("--watermark", action="store_true", help="embed text watermarks")
+    s.add_argument("--l3-mode", choices=("auto", "off", "full", "boilerplate"), default="auto",
+                   help="semantic L3 mode; auto disables L3 for wording-sensitive document classes")
+    s.add_argument("--l3-ack", action="store_true",
+                   help="acknowledge that enabled L3 makes recipient text non-identical")
+    s.add_argument("--document-class",
+                   choices=("auto", "prose", "legal", "regulatory", "technical_spec",
+                            "source_code", "sql", "log", "structured_data"),
+                   default="auto",
+                   help="declare document class for L3 safety decisions")
     s.add_argument("--register", default=None, help="POST manifest to this registry URL")
 
     o = sub.add_parser("open")

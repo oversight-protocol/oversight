@@ -211,7 +211,13 @@ def extract_ws_partial(
 
 # ---------------- high-level apply/recover ----------------
 
-def apply_all(text: str, mark_id: bytes) -> str:
+def apply_all(
+    text: str,
+    mark_id: bytes,
+    *,
+    include_l3: bool = False,
+    l3_mode: str = "full",
+) -> str:
     """
     Apply all available watermark layers to text.
 
@@ -220,8 +226,9 @@ def apply_all(text: str, mark_id: bytes) -> str:
     last because it inserts invisible characters that could fragment synonym
     words if applied earlier.
     """
-    if _L3_AVAILABLE:
-        t = _semantic.apply_semantic(text, mark_id)
+    if include_l3 and _L3_AVAILABLE:
+        from . import l3_policy
+        t = l3_policy.apply_l3_safe(text, mark_id, mode=l3_mode)
     else:
         t = text
     t = embed_ws(t, mark_id)

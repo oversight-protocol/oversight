@@ -131,6 +131,8 @@ The manifest is canonical JSON (sorted keys, no whitespace, UTF-8). Required fie
 - `version` (`"OVERSIGHT-v1"`)
 - `suite` (suite identifier string)
 - `content_hash` (hex SHA-256 of plaintext)
+- `canonical_content_hash` (hex SHA-256 of the source bytes before
+  L3/L2/L1 watermarking; used to resolve wording disputes)
 - `size_bytes` (plaintext length)
 - `issuer_id` (string)
 - `issuer_ed25519_pub` (hex)
@@ -143,6 +145,8 @@ Optional fields:
 - `watermarks` (array of `{layer, mark_id}`)
 - `beacons` (array of beacon descriptors)
 - `policy` (`not_after`, `max_opens`, `jurisdiction`, `registry_url`, `require_attestation`)
+- `l3_policy` (object describing L3 mode, document class, disclosure state,
+  and safety rationale)
 - `signature_ml_dsa` (hex, for HYBRID suites)
 
 ### 5.3 DEK wrapping
@@ -165,13 +169,20 @@ After decryption, the implementation MUST verify that `SHA-256(plaintext) == man
 
 ## 6. Watermarking
 
-Watermarking is optional but RECOMMENDED. Each applied layer registers a `mark_id` in the manifest.
+Watermarking is optional but RECOMMENDED. Each applied layer registers a
+`mark_id` in the manifest. L3 semantic watermarking changes visible prose and
+is therefore opt-in for wording-sensitive classes. Implementations MUST
+default L3 off for legal documents, regulatory filings, technical
+specifications, source code, SQL, logs, and structured data unless the user
+explicitly enables and acknowledges the textual change.
 
 ### 6.1 Layer identifiers
 
 - `L1_zero_width` — zero-width unicode characters scattered through text payloads
 - `L2_whitespace` — trailing space vs tab at line endings
-- `L3_synonyms` — synonym-class rotation (reserved; MVP stub)
+- `L3_synonyms` — legacy synonym-class rotation identifier
+- `L3_semantic_full` — guarded semantic marks over eligible prose regions
+- `L3_semantic_boilerplate` — guarded semantic marks limited to header/footer/cover-page regions
 - `L4_dct_visual` — reserved; for image payloads
 - `L5_layout` — reserved; for PDF/document layout perturbation
 

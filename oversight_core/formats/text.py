@@ -11,10 +11,10 @@ into a single apply/recover API.
 
 from __future__ import annotations
 
-from .. import watermark, semantic
+from .. import watermark, l3_policy, semantic
 
 
-def apply(text: str, mark_id: bytes, layers: tuple[str, ...] = ("L1", "L2", "L3")) -> str:
+def apply(text: str, mark_id: bytes, layers: tuple[str, ...] = ("L1", "L2")) -> str:
     """Apply all requested watermark layers to UTF-8 text.
 
     Layer order matters: L3 rewrites visible words, so it must run before the
@@ -22,7 +22,7 @@ def apply(text: str, mark_id: bytes, layers: tuple[str, ...] = ("L1", "L2", "L3"
     """
     t = text
     if "L3" in layers:
-        t = semantic.apply_semantic(t, mark_id)
+        t = l3_policy.apply_l3_safe(t, mark_id, mode="full")
     if "L2" in layers:
         t = watermark.embed_ws(t, mark_id)
     if "L1" in layers:
