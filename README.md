@@ -2,7 +2,7 @@
 
 **Open protocol for cryptographic data provenance, recipient attribution, and leak detection.**
 
-Co-authored by Zion Boggan and Claude Opus 4.6/4.7 (Anthropic).
+Co-authored by Zion Boggan and Claude Opus 4.6/4.7 (Anthropic) and Codex ChatGPT-5-4 (OpenAI).
 
 Format-agnostic. Post-quantum ready (ML-KEM-768 + ML-DSA-65). Three-layer watermarking that survives format conversion, invisible-char stripping, and screenshot/OCR. Content fingerprinting that identifies leaked copies even when all watermarks are destroyed.
 
