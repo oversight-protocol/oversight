@@ -17,6 +17,7 @@ oversight-container = { path = "../oversight-container" }
 oversight-manifest = { path = "../oversight-manifest" }
 oversight-watermark = { path = "../oversight-watermark" }
 oversight-formats = { path = "../oversight-formats" }
+oversight-policy = { path = "../oversight-policy" }
 clap.workspace = true
 serde.workspace = true
 serde_json.workspace = true

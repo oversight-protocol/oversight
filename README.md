@@ -131,6 +131,10 @@ These items are included in v0.4.4 and current `main`:
 - Registry registration now refuses unsigned beacon/watermark sidecars that do not match the issuer-signed manifest.
 - Multi-recipient sealing is disabled until a recipient-honest manifest format lands.
 - Local transparency-log empty-tree roots now match RFC 6962 exactly.
+- Rust registry and format-adapter paths now mirror the Python hardening:
+  authenticated DNS beacon callbacks, no silent signed-artifact drops,
+  digest-checked Rekor offline verification, fail-closed Rust `max_opens`,
+  DOCX keyword insertion, and PDF action screening.
 
 ## Repository layout
 

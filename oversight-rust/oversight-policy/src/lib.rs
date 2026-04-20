@@ -237,7 +237,8 @@ pub fn check_policy(manifest: &Manifest, ctx: Option<&PolicyContext>) -> Result<
 }
 
 /// Atomic check-and-bump the open counter (if policy has max_opens).
-/// Call BEFORE decryption so plaintext is never computed when limit is exceeded.
+/// Call after a successful recipient decrypt, before releasing plaintext, so
+/// failed key guesses cannot consume the recipient's open budget.
 /// Returns new count (0 if no max_opens policy).
 pub fn record_open(manifest: &Manifest, ctx: Option<&PolicyContext>) -> Result<u64> {
     let ctx = match ctx {
@@ -249,10 +250,13 @@ pub fn record_open(manifest: &Manifest, ctx: Option<&PolicyContext>) -> Result<u
         None => return Ok(0),
     };
     match ctx.mode {
-        Mode::LocalOnly | Mode::Hybrid | Mode::Registry => {
-            // Registry/Hybrid fallback to local; real registry handling would POST /policy/open.
-            local_check_and_bump(ctx, &manifest.file_id, mx)
-        }
+        Mode::LocalOnly => local_check_and_bump(ctx, &manifest.file_id, mx),
+        Mode::Registry => Err(PolicyError::Violation(
+            "registry max_opens enforcement is not implemented; refusing local fallback".into(),
+        )),
+        Mode::Hybrid => Err(PolicyError::Violation(
+            "hybrid max_opens enforcement is not implemented; refusing silent local fallback".into(),
+        )),
     }
 }
 
@@ -346,6 +350,26 @@ mod tests {
             "max_opens": 5,
         }));
         m.file_id = "../../../etc/passwd".into();
+        assert!(record_open(&m, Some(&ctx)).is_err());
+    }
+
+    #[test]
+    fn registry_modes_refuse_silent_local_fallback() {
+        let m = make_manifest_with(serde_json::json!({
+            "max_opens": 1,
+        }));
+        let ctx = PolicyContext {
+            mode: Mode::Registry,
+            registry_url: Some("https://registry.test".into()),
+            ..Default::default()
+        };
+        assert!(record_open(&m, Some(&ctx)).is_err());
+
+        let ctx = PolicyContext {
+            mode: Mode::Hybrid,
+            registry_url: Some("https://registry.test".into()),
+            ..Default::default()
+        };
         assert!(record_open(&m, Some(&ctx)).is_err());
     }
 }

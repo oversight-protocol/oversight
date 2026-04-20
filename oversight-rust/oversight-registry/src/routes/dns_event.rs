@@ -1,7 +1,9 @@
-//! POST /dns_event — beacon callback logging from the DNS server.
+//! POST /dns_event — authenticated beacon callback logging from the DNS server.
 
-use axum::extract::State;
+use axum::extract::{ConnectInfo, State};
+use axum::http::HeaderMap;
 use axum::Json;
+use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -12,11 +14,21 @@ use crate::AppState;
 
 pub async fn dns_event(
     State(state): State<Arc<AppState>>,
+    ConnectInfo(addr): ConnectInfo<SocketAddr>,
+    headers: HeaderMap,
     Json(evt): Json<DnsEventRequest>,
 ) -> Result<Json<DnsEventResponse>> {
+    verify_dns_event_auth(&state, &headers, &addr)?;
+
     // Validate input sizes
     if evt.token_id.is_empty() || evt.token_id.len() > MAX_ID_LEN {
         return Err(RegistryError::BadRequest("invalid token_id".into()));
+    }
+    if evt.client_ip.as_deref().is_some_and(|v| v.len() > MAX_ID_LEN)
+        || evt.qtype.as_deref().is_some_and(|v| v.len() > MAX_ID_LEN)
+        || evt.qname.as_deref().is_some_and(|v| v.len() > MAX_ID_LEN)
+    {
+        return Err(RegistryError::BadRequest("dns event field too long".into()));
     }
 
     // Look up beacon ownership
@@ -83,4 +95,42 @@ pub async fn dns_event(
         ok: true,
         tlog_index: tlog_idx,
     }))
+}
+
+fn verify_dns_event_auth(
+    state: &AppState,
+    headers: &HeaderMap,
+    addr: &SocketAddr,
+) -> Result<()> {
+    if let Some(secret) = state.dns_event_secret.as_deref() {
+        let supplied = headers
+            .get("x-oversight-dns-secret")
+            .and_then(|v| v.to_str().ok())
+            .unwrap_or("");
+        if constant_time_eq(supplied.as_bytes(), secret.as_bytes()) {
+            return Ok(());
+        }
+        return Err(RegistryError::BadRequest(
+            "invalid dns event authentication".into(),
+        ));
+    }
+
+    if addr.ip().is_loopback() {
+        return Ok(());
+    }
+
+    Err(RegistryError::BadRequest(
+        "OVERSIGHT_DNS_EVENT_SECRET is required for non-loopback DNS event callbacks".into(),
+    ))
+}
+
+fn constant_time_eq(a: &[u8], b: &[u8]) -> bool {
+    if a.len() != b.len() {
+        return false;
+    }
+    let mut diff = 0u8;
+    for (&x, &y) in a.iter().zip(b.iter()) {
+        diff |= x ^ y;
+    }
+    diff == 0
 }

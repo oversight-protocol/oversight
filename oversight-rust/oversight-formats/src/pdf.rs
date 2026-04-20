@@ -213,15 +213,38 @@ pub fn extract_text_for_fingerprint(pdf_bytes: &[u8]) -> Result<String, FormatEr
 fn security_check(doc: &Document) -> Result<(), FormatError> {
     for (_id, obj) in doc.objects.iter() {
         if let Ok(dict) = obj.as_dict() {
-            // Check for JavaScript
             if dict.has(b"JS") || dict.has(b"JavaScript") {
                 return Err(FormatError::Malformed(
                     "PDF contains JavaScript -- refusing to process for security".into(),
                 ));
             }
-            // Check for auto-open actions
+            if let Ok(s_type) = dict.get(b"S") {
+                if let Ok(name) = s_type.as_name_str() {
+                    match name {
+                        "Launch" | "JavaScript" => {
+                            return Err(FormatError::Malformed(
+                                "PDF contains Launch/JavaScript action -- refusing to process"
+                                    .into(),
+                            ));
+                        }
+                        "URI" => {
+                            if let Ok(uri_obj) = dict.get(b"URI") {
+                                if let Some(uri) = pdf_object_string(uri_obj) {
+                                    let lower = uri.to_ascii_lowercase();
+                                    if !lower.starts_with("https://") {
+                                        return Err(FormatError::Malformed(
+                                            "PDF contains unsafe URI action -- refusing to process"
+                                                .into(),
+                                        ));
+                                    }
+                                }
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+            }
             if dict.has(b"OpenAction") || dict.has(b"AA") {
-                // Check if the action is JavaScript-based
                 if let Ok(action) = dict.get(b"OpenAction").or(dict.get(b"AA")) {
                     if let Ok(action_dict) = action.as_dict() {
                         if action_dict.has(b"JS") || action_dict.has(b"JavaScript") {
@@ -245,6 +268,14 @@ fn security_check(doc: &Document) -> Result<(), FormatError> {
         }
     }
     Ok(())
+}
+
+fn pdf_object_string(obj: &Object) -> Option<String> {
+    match obj {
+        Object::String(bytes, _) => Some(String::from_utf8_lossy(bytes).to_string()),
+        Object::Name(bytes) => Some(String::from_utf8_lossy(bytes).to_string()),
+        _ => None,
+    }
 }
 
 /// Sanitize a string for safe inclusion in PDF metadata.
@@ -334,6 +365,28 @@ mod tests {
         assert_eq!(sanitize_pdf_string("hello(world)"), "helloworld");
         assert_eq!(sanitize_pdf_string("test\\injection"), "testinjection");
         assert_eq!(sanitize_pdf_string("normal text 123"), "normal text 123");
+    }
+
+    #[test]
+    fn security_check_rejects_indirect_launch_action_objects() {
+        let mut doc = Document::with_version("1.7");
+        let mut action = lopdf::Dictionary::new();
+        action.set("S", Object::Name(b"Launch".to_vec()));
+        doc.objects.insert((1, 0), Object::Dictionary(action));
+        assert!(security_check(&doc).is_err());
+    }
+
+    #[test]
+    fn security_check_rejects_unsafe_uri_actions() {
+        let mut doc = Document::with_version("1.7");
+        let mut action = lopdf::Dictionary::new();
+        action.set("S", Object::Name(b"URI".to_vec()));
+        action.set(
+            "URI",
+            Object::String(b"file:///C:/secret".to_vec(), StringFormat::Literal),
+        );
+        doc.objects.insert((1, 0), Object::Dictionary(action));
+        assert!(security_check(&doc).is_err());
     }
 
     // Note: Full embed/extract round-trip tests require a valid PDF file.

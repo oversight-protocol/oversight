@@ -9,6 +9,7 @@ description = "Binary .sealed container format for Oversight"
 [dependencies]
 oversight-crypto = { path = "../oversight-crypto" }
 oversight-manifest = { path = "../oversight-manifest" }
+oversight-policy = { path = "../oversight-policy" }
 serde.workspace = true
 serde_json.workspace = true
 hex.workspace = true

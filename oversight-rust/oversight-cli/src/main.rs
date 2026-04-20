@@ -10,6 +10,7 @@ use oversight_container::{open_sealed, seal, SealedFile};
 use oversight_crypto::{self as crypto, ClassicIdentity};
 use oversight_formats::{FormatAdapter, FormatRegistry};
 use oversight_manifest::{Manifest, Recipient};
+use oversight_policy::PolicyContext;
 
 #[derive(Parser)]
 #[command(name = "oversight")]
@@ -69,6 +70,10 @@ enum Commands {
         /// Recipient identity JSON
         #[arg(short = 'R', long)]
         recipient: PathBuf,
+
+        /// Local directory for max_opens counters
+        #[arg(long, default_value = ".oversight/policy-state")]
+        policy_state_dir: PathBuf,
     },
 
     /// Print the signed manifest + structural metadata of a sealed file
@@ -216,11 +221,13 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             input,
             output,
             recipient,
+            policy_state_dir,
         } => {
             let recipient_id = load_identity(&recipient)?;
             let blob = std::fs::read(&input)?;
+            let policy_ctx = PolicyContext::local_only(policy_state_dir)?;
             let (plaintext, manifest) =
-                open_sealed(&blob, recipient_id.x25519_priv.as_ref(), None)?;
+                open_sealed(&blob, recipient_id.x25519_priv.as_ref(), None, Some(&policy_ctx))?;
             if output.as_os_str() == "-" {
                 use std::io::Write;
                 std::io::stdout().write_all(&plaintext)?;

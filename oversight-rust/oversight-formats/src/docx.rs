@@ -284,17 +284,34 @@ fn inject_keywords_into_core_xml(xml_bytes: &[u8], tag: &str) -> Result<Vec<u8>,
         }
     }
 
-    // If no <cp:keywords> element was found, we would need to insert one.
-    // For simplicity in this scaffold, we just return the output as-is.
-    // A full implementation would insert the element before </cp:coreProperties>.
     if !found_keywords {
-        // Fall back: rewrite the whole XML with the keywords added.
-        // For now, return original with a note that keywords weren't found.
-        // TODO: Insert <cp:keywords> element if missing.
-        return Ok(xml_bytes.to_vec());
+        return insert_keywords_into_core_xml(xml_bytes, tag);
     }
 
     Ok(output)
+}
+
+fn insert_keywords_into_core_xml(xml_bytes: &[u8], tag: &str) -> Result<Vec<u8>, FormatError> {
+    let xml = std::str::from_utf8(xml_bytes)
+        .map_err(|e| FormatError::Malformed(format!("core.xml is not UTF-8: {}", e)))?;
+    let keywords = format!(
+        "<cp:keywords>{}</cp:keywords>",
+        quick_xml::escape::escape(tag)
+    );
+
+    for closing in ["</cp:coreProperties>", "</coreProperties>"] {
+        if let Some(idx) = xml.rfind(closing) {
+            let mut out = String::with_capacity(xml.len() + keywords.len());
+            out.push_str(&xml[..idx]);
+            out.push_str(&keywords);
+            out.push_str(&xml[idx..]);
+            return Ok(out.into_bytes());
+        }
+    }
+
+    Err(FormatError::Malformed(
+        "docProps/core.xml missing coreProperties closing tag".into(),
+    ))
 }
 
 /// Extract the text content of `<cp:keywords>` from core.xml.
@@ -508,5 +525,17 @@ mod tests {
         assert!(xml.contains("cp:keywords"));
         assert!(xml.contains("oversight:abcdef"));
         assert!(xml.contains("<?xml"));
+    }
+
+    #[test]
+    fn inject_keywords_adds_missing_element() {
+        let xml = br#"<?xml version="1.0" encoding="UTF-8"?>
+<cp:coreProperties xmlns:cp="http://schemas.openxmlformats.org/package/2006/metadata/core-properties">
+  <dc:title xmlns:dc="http://purl.org/dc/elements/1.1/">Report</dc:title>
+</cp:coreProperties>"#;
+        let out = inject_keywords_into_core_xml(xml, "oversight:abcdef").unwrap();
+        let s = String::from_utf8(out).unwrap();
+        assert!(s.contains("<cp:keywords>oversight:abcdef</cp:keywords>"));
+        assert!(s.contains("</cp:coreProperties>"));
     }
 }

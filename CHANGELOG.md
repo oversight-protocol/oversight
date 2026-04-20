@@ -33,6 +33,22 @@ confuse the hardened tree with the vulnerable `v0.4.3` baseline.
   inclusion proofs for recorded events, not just the signed tree head.
 - `oversight-rust`: removed the direct `rand` dependency in favor of
   `rand_core::OsRng`, clearing the low-severity `rand` advisory path.
+- `oversight-rust/oversight-registry`: `/dns_event` now requires
+  `OVERSIGHT_DNS_EVENT_SECRET` for non-loopback callbacks, signed
+  beacon/watermark artifacts fail registration when malformed instead of being
+  silently dropped, and Rekor attestation skips watermarkless registrations
+  rather than logging `mark:<file_id>`.
+- `oversight-rust/oversight-container` and `oversight-rust/oversight-policy`:
+  Rust opens can now enforce `max_opens` after successful recipient decrypt,
+  `REGISTRY` / `HYBRID` modes fail closed instead of falling back to local
+  counters, and Rust `seal_multi()` fails closed until recipient-honest
+  manifests exist.
+- `oversight-rust/oversight-rekor`: offline verification now mirrors Python by
+  rejecting DSSE envelopes whose subject digest does not match the expected
+  content hash.
+- `oversight-rust/oversight-formats`: DOCX metadata insertion no longer reports
+  success when `<cp:keywords>` is missing, and PDF processing rejects indirect
+  Launch / JavaScript / unsafe URI actions before rewriting files.
 - Added focused regression coverage in `tests/test_policy_unit.py`,
   `tests/test_registry_unit.py`, `tests/test_rekor_unit.py`,
   `tests/test_text_format_unit.py`, and `tests/test_tlog_unit.py`.
@@ -51,6 +67,13 @@ Patch sequence on top of `v0.4.3`:
    empty tlog roots fixed.
 7. `0.4.4` / `0a7a2da`: package, core, and CLI version metadata
    aligned to the hardened `0.4.4` line.
+8. `0.4.4` / `69e50aa`: public changelog patch chronology documented.
+9. `0.4.4` / `26db8d3`: DNS evidence hardening, Rust RNG dependency
+   cleanup, and evidence-bundle inclusion proofs.
+10. `0.5.0+` / `b9bee41`: Claude-added Rust format adapters, Axum registry,
+    and USENIX benchmark scaffolding.
+11. `0.5.0+` / current hardening commit: Codex audit fixes for the new Rust
+    registry/container/policy/Rekor/format-adapter security regressions.
 
 ## v0.5.0 — 2026-04-19
 

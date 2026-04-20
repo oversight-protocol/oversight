@@ -304,9 +304,27 @@ pub fn verify_inclusion_offline(
     bundle_rekor_field: &Value,
     envelope: &DsseEnvelope,
     issuer_ed25519_pub: &[u8],
+    expected_content_hash_sha256_hex: &str,
 ) -> (bool, &'static str) {
     if !verify_dsse(envelope, issuer_ed25519_pub) {
         return (false, "dsse signature did not verify under issuer pubkey");
+    }
+    let statement = match envelope_payload_statement(envelope) {
+        Ok(v) => v,
+        Err(_) => return (false, "dsse payload missing subject digest"),
+    };
+    let subject_digest = statement
+        .get("subject")
+        .and_then(|v| v.as_array())
+        .and_then(|items| items.first())
+        .and_then(|subject| subject.get("digest"))
+        .and_then(|digest| digest.get("sha256"))
+        .and_then(|v| v.as_str());
+    if subject_digest.is_none() {
+        return (false, "dsse payload missing subject digest");
+    }
+    if subject_digest != Some(expected_content_hash_sha256_hex) {
+        return (false, "dsse subject digest does not match expected content hash");
     }
     let tle = match bundle_rekor_field.get("transparency_log_entry") {
         Some(v) if v.is_object() => v,
@@ -525,11 +543,52 @@ mod tests {
         let mut csprng = OsRng;
         let sk = SigningKey::generate(&mut csprng);
         let pk = sk.verifying_key();
-        let stmt = serde_json::json!({"x": 1});
+        let pred = OversightRegistrationPredicate {
+            file_id: "f".into(),
+            issuer_pubkey_ed25519: "1".repeat(64),
+            recipient_id: "r".into(),
+            recipient_pubkey_sha256: "0".repeat(64),
+            suite: "classic".into(),
+            registered_at: "2026-04-19T00:00:00Z".into(),
+            rfc3161_tsa: None,
+            rfc3161_token_b64: None,
+            rfc3161_chain_b64: None,
+            policy: Default::default(),
+            watermarks: Default::default(),
+        };
+        let stmt = build_statement("a", &"b".repeat(64), &pred);
         let env = sign_dsse(&stmt, &sk.to_bytes(), "").unwrap();
         let bundle_rekor = serde_json::json!({});
-        let (ok, reason) = verify_inclusion_offline(&bundle_rekor, &env, pk.as_bytes());
+        let (ok, reason) = verify_inclusion_offline(&bundle_rekor, &env, pk.as_bytes(), &"b".repeat(64));
         assert!(!ok);
         assert!(reason.contains("transparency_log_entry"));
+    }
+
+    #[test]
+    fn offline_verify_rejects_subject_digest_mismatch() {
+        let mut csprng = OsRng;
+        let sk = SigningKey::generate(&mut csprng);
+        let pk = sk.verifying_key();
+        let pred = OversightRegistrationPredicate {
+            file_id: "f".into(),
+            issuer_pubkey_ed25519: "1".repeat(64),
+            recipient_id: "r".into(),
+            recipient_pubkey_sha256: "0".repeat(64),
+            suite: "classic".into(),
+            registered_at: "2026-04-19T00:00:00Z".into(),
+            rfc3161_tsa: None,
+            rfc3161_token_b64: None,
+            rfc3161_chain_b64: None,
+            policy: Default::default(),
+            watermarks: Default::default(),
+        };
+        let stmt = build_statement("a", &"b".repeat(64), &pred);
+        let env = sign_dsse(&stmt, &sk.to_bytes(), "").unwrap();
+        let bundle_rekor = serde_json::json!({
+            "transparency_log_entry": {"inclusionProof": {}}
+        });
+        let (ok, reason) = verify_inclusion_offline(&bundle_rekor, &env, pk.as_bytes(), &"c".repeat(64));
+        assert!(!ok);
+        assert!(reason.contains("subject digest"));
     }
 }

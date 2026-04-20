@@ -21,6 +21,7 @@
 
 use oversight_crypto::{self as crypto, CryptoError, WrappedDek};
 use oversight_manifest::{Manifest, ManifestError};
+use oversight_policy::{self, PolicyContext};
 use thiserror::Error;
 
 pub const MAGIC: [u8; 6] = *b"OSGT\x01\x00";
@@ -54,6 +55,8 @@ pub enum ContainerError {
     Manifest(#[from] ManifestError),
     #[error(transparent)]
     Crypto(#[from] CryptoError),
+    #[error(transparent)]
+    Policy(#[from] oversight_policy::PolicyError),
     #[error("json: {0}")]
     Json(#[from] serde_json::Error),
     #[error("invalid utf-8: {0}")]
@@ -232,6 +235,7 @@ pub fn open_sealed(
     blob: &[u8],
     recipient_x25519_priv: &[u8],
     trusted_issuer_pubs: Option<&[String]>,
+    policy_ctx: Option<&PolicyContext>,
 ) -> Result<(Vec<u8>, Manifest), ContainerError> {
     if recipient_x25519_priv.len() != 32 {
         return Err(ContainerError::Precondition("recipient priv key must be 32 bytes"));
@@ -287,58 +291,24 @@ pub fn open_sealed(
         return Err(ContainerError::HashMismatch);
     }
 
+    // Count only successful recipient decryptions. Failed key guesses cannot
+    // burn max_opens, but a policy failure still prevents plaintext release.
+    oversight_policy::record_open(&sf.manifest, policy_ctx)?;
+
     Ok((plaintext, sf.manifest))
 }
 
-/// Seal for multiple recipients (compact storage: one ciphertext, N key wraps).
+/// Fail closed until the manifest schema can explicitly bind every recipient.
 pub fn seal_multi(
     plaintext: &[u8],
     manifest: &mut Manifest,
     issuer_ed25519_priv: &[u8],
     recipient_x25519_pubs: &[&[u8]],
 ) -> Result<Vec<u8>, ContainerError> {
-    if manifest.content_hash != crypto::content_hash(plaintext) {
-        return Err(ContainerError::Precondition(
-            "manifest.content_hash != sha256(plaintext)",
-        ));
-    }
-    if manifest.size_bytes != plaintext.len() as u64 {
-        return Err(ContainerError::Precondition(
-            "manifest.size_bytes != len(plaintext)",
-        ));
-    }
-    if recipient_x25519_pubs.is_empty() {
-        return Err(ContainerError::Precondition("need at least one recipient"));
-    }
-    for (i, pub_key) in recipient_x25519_pubs.iter().enumerate() {
-        if pub_key.len() != 32 {
-            return Err(ContainerError::Precondition(
-                "recipient pubkey must be 32 bytes",
-            ));
-        }
-        let _ = i;
-    }
-
-    manifest.sign(issuer_ed25519_priv)?;
-    let dek = crypto::random_dek();
-    let slots: Result<Vec<_>, _> = recipient_x25519_pubs
-        .iter()
-        .map(|p| crypto::wrap_dek_for_recipient(dek.as_ref(), p))
-        .collect();
-    let slots = slots?;
-    let slots_json: Vec<_> = slots.iter().map(|s| s.to_json_hex()).collect();
-
-    let aad = manifest.content_hash.as_bytes();
-    let (nonce, ct) = crypto::aead_encrypt(dek.as_ref(), plaintext, aad)?;
-
-    let sf = SealedFile {
-        manifest: manifest.clone(),
-        wrapped_dek: serde_json::json!({ "slots": slots_json }),
-        aead_nonce: nonce,
-        ciphertext: ct,
-        suite_id: SUITE_CLASSIC_V1_ID,
-    };
-    sf.to_bytes()
+    let _ = (plaintext, manifest, issuer_ed25519_priv, recipient_x25519_pubs);
+    Err(ContainerError::Precondition(
+        "seal_multi disabled until manifests can bind all recipients",
+    ))
 }
 
 #[cfg(test)]
@@ -374,7 +344,7 @@ mod tests {
         let plaintext = b"This is my secret document.";
         let mut m = make_manifest(&issuer, &recipient, plaintext);
         let blob = seal(plaintext, &mut m, issuer.ed25519_priv.as_ref(), &recipient.x25519_pub).unwrap();
-        let (pt, manifest) = open_sealed(&blob, recipient.x25519_priv.as_ref(), None).unwrap();
+        let (pt, manifest) = open_sealed(&blob, recipient.x25519_priv.as_ref(), None, None).unwrap();
         assert_eq!(pt, plaintext);
         assert_eq!(manifest.file_id, m.file_id);
     }
@@ -388,7 +358,7 @@ mod tests {
         let mut m = make_manifest(&issuer, &alice, plaintext);
         let blob = seal(plaintext, &mut m, issuer.ed25519_priv.as_ref(), &alice.x25519_pub).unwrap();
         // Bob tries to open — should fail at AEAD stage
-        assert!(open_sealed(&blob, bob.x25519_priv.as_ref(), None).is_err());
+        assert!(open_sealed(&blob, bob.x25519_priv.as_ref(), None, None).is_err());
     }
 
     #[test]
@@ -400,7 +370,7 @@ mod tests {
         let mut blob = seal(plaintext, &mut m, issuer.ed25519_priv.as_ref(), &alice.x25519_pub).unwrap();
         let len = blob.len();
         blob[len - 1] ^= 0x01;
-        assert!(open_sealed(&blob, alice.x25519_priv.as_ref(), None).is_err());
+        assert!(open_sealed(&blob, alice.x25519_priv.as_ref(), None, None).is_err());
     }
 
     #[test]
@@ -440,22 +410,43 @@ mod tests {
         let mut m = make_manifest(&issuer, &alice, plaintext);
         m.policy["not_after"] = serde_json::json!(1000);  // long ago
         let blob = seal(plaintext, &mut m, issuer.ed25519_priv.as_ref(), &alice.x25519_pub).unwrap();
-        match open_sealed(&blob, alice.x25519_priv.as_ref(), None) {
+        match open_sealed(&blob, alice.x25519_priv.as_ref(), None, None) {
             Err(ContainerError::Precondition("file expired (not_after)")) => (),
             other => panic!("expected expiry error, got {:?}", other.is_ok()),
         }
     }
 
     #[test]
-    fn seal_multi_three_recipients() {
+    fn max_opens_counts_only_successful_decrypts() {
+        let issuer = ClassicIdentity::generate();
+        let alice = ClassicIdentity::generate();
+        let bob = ClassicIdentity::generate();
+        let plaintext = b"limited";
+        let mut m = make_manifest(&issuer, &alice, plaintext);
+        m.policy["max_opens"] = serde_json::json!(1);
+        let blob = seal(plaintext, &mut m, issuer.ed25519_priv.as_ref(), &alice.x25519_pub).unwrap();
+
+        let dir = std::env::temp_dir().join(format!(
+            "oversight-container-policy-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+        let ctx = oversight_policy::PolicyContext::local_only(&dir).unwrap();
+
+        assert!(open_sealed(&blob, bob.x25519_priv.as_ref(), None, Some(&ctx)).is_err());
+        assert!(open_sealed(&blob, alice.x25519_priv.as_ref(), None, Some(&ctx)).is_ok());
+        assert!(open_sealed(&blob, alice.x25519_priv.as_ref(), None, Some(&ctx)).is_err());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn seal_multi_fails_closed_until_manifest_schema_exists() {
         let issuer = ClassicIdentity::generate();
         let alice = ClassicIdentity::generate();
         let bob = ClassicIdentity::generate();
         let carol = ClassicIdentity::generate();
-        let stranger = ClassicIdentity::generate();
 
         let plaintext = b"shared document for cohort";
-        // For seal_multi, we use a placeholder recipient in the manifest
         let mut m = Manifest::new(
             "cohort.txt",
             crypto::content_hash(plaintext),
@@ -474,14 +465,9 @@ mod tests {
             "GLOBAL",
         );
         let recipients: Vec<&[u8]> = vec![&alice.x25519_pub, &bob.x25519_pub, &carol.x25519_pub];
-        let blob = seal_multi(plaintext, &mut m, issuer.ed25519_priv.as_ref(), &recipients).unwrap();
-
-        // All three should decrypt
-        for r in [&alice, &bob, &carol] {
-            let (pt, _) = open_sealed(&blob, r.x25519_priv.as_ref(), None).unwrap();
-            assert_eq!(pt, plaintext);
+        match seal_multi(plaintext, &mut m, issuer.ed25519_priv.as_ref(), &recipients) {
+            Err(ContainerError::Precondition(msg)) => assert!(msg.contains("seal_multi disabled")),
+            other => panic!("expected seal_multi to fail closed, got {:?}", other.is_ok()),
         }
-        // Stranger should fail
-        assert!(open_sealed(&blob, stranger.x25519_priv.as_ref(), None).is_err());
     }
 }

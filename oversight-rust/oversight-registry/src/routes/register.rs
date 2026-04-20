@@ -118,13 +118,16 @@ pub async fn register(
         let token_id = beacon
             .get("token_id")
             .and_then(|v| v.as_str())
-            .unwrap_or("");
+            .ok_or_else(|| RegistryError::BadRequest("signed beacon missing token_id".into()))?;
         let kind = beacon
             .get("kind")
             .and_then(|v| v.as_str())
             .unwrap_or("unknown");
         if token_id.is_empty() || token_id.len() > MAX_ID_LEN {
-            continue;
+            return Err(RegistryError::BadRequest("signed beacon has invalid token_id".into()));
+        }
+        if kind.is_empty() || kind.len() > MAX_ID_LEN {
+            return Err(RegistryError::BadRequest("signed beacon has invalid kind".into()));
         }
         db::upsert_beacon(&state.db, token_id, file_id, recipient_id, issuer_id, kind, now)
             .await?;
@@ -134,13 +137,16 @@ pub async fn register(
         let mark_id = watermark
             .get("mark_id")
             .and_then(|v| v.as_str())
-            .unwrap_or("");
+            .ok_or_else(|| RegistryError::BadRequest("signed watermark missing mark_id".into()))?;
         let layer = watermark
             .get("layer")
             .and_then(|v| v.as_str())
             .unwrap_or("unknown");
         if mark_id.is_empty() || mark_id.len() > MAX_ID_LEN {
-            continue;
+            return Err(RegistryError::BadRequest("signed watermark has invalid mark_id".into()));
+        }
+        if layer.is_empty() || layer.len() > MAX_ID_LEN {
+            return Err(RegistryError::BadRequest("signed watermark has invalid layer".into()));
         }
         db::upsert_watermark(&state.db, mark_id, layer, file_id, recipient_id, issuer_id, now)
             .await?;
@@ -236,10 +242,14 @@ fn attest_to_rekor(
         None => "0".repeat(64),
     };
 
-    let mark_id_hex = signed_watermarks
+    let Some(mark_id_hex) = signed_watermarks
         .iter()
-        .find_map(|w| w.get("mark_id").and_then(|v| v.as_str()))
-        .unwrap_or(file_id);
+        .find_map(|w| w.get("mark_id").and_then(|v| v.as_str())) else {
+        return Some(serde_json::json!({
+            "skipped": "no signed watermark mark_id to attest",
+            "tlog_kind": oversight_rekor::TLOG_KIND,
+        }));
+    };
 
     let mut wm_map = std::collections::BTreeMap::new();
     for (i, w) in signed_watermarks.iter().enumerate() {
