@@ -399,12 +399,14 @@ def verify_inclusion_offline(
     bundle_rekor_field: dict,
     envelope: DSSEEnvelope,
     issuer_ed25519_pub: bytes,
+    expected_content_hash_sha256_hex: str,
 ) -> tuple[bool, str]:
     """Verify a bundled Rekor entry without contacting the log.
 
     Checks (in order):
       1. The DSSE envelope verifies under ``issuer_ed25519_pub``.
-      2. The envelope payload's subject digest matches the bundle's claim.
+      2. The envelope payload's subject digest matches the bundle manifest's
+         expected plaintext SHA-256.
       3. The bundled ``transparency_log_entry`` has the structural fields the
          tile-backed log returns (logIndex + signed checkpoint or proof).
 
@@ -414,6 +416,13 @@ def verify_inclusion_offline(
     """
     if not verify_dsse(envelope, issuer_ed25519_pub):
         return False, "dsse signature did not verify under issuer pubkey"
+    statement = envelope_payload_statement(envelope)
+    try:
+        subject_digest = statement["subject"][0]["digest"]["sha256"]
+    except (KeyError, IndexError, TypeError):
+        return False, "dsse payload missing subject digest"
+    if subject_digest != expected_content_hash_sha256_hex:
+        return False, "dsse subject digest does not match expected content hash"
     tle = bundle_rekor_field.get("transparency_log_entry") or {}
     if not isinstance(tle, dict) or not tle:
         return False, "bundle missing transparency_log_entry payload"

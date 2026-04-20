@@ -40,10 +40,11 @@ class PolicyViolation(Exception):
 @dataclass
 class PolicyContext:
     """State the opener needs to enforce policy. Typically constructed from env/config."""
+
     jurisdiction: str = "GLOBAL"
     state_dir: Optional[Path] = None  # for LOCAL_ONLY open-counter persistence
     registry_url: Optional[str] = None  # for REGISTRY mode
-    mode: str = "LOCAL_ONLY"           # LOCAL_ONLY | REGISTRY | HYBRID
+    mode: str = "LOCAL_ONLY"  # LOCAL_ONLY | REGISTRY | HYBRID
 
     def __post_init__(self):
         if self.state_dir:
@@ -54,7 +55,7 @@ class PolicyContext:
 def _local_counter_path(ctx: PolicyContext, file_id: str) -> Path:
     if ctx.state_dir is None:
         raise ValueError("PolicyContext.state_dir is required for LOCAL_ONLY mode")
-    # file_id is a UUID string — defense against path traversal:
+    # file_id is a UUID string; defense against path traversal.
     if "/" in file_id or "\\" in file_id or ".." in file_id:
         raise ValueError(f"invalid file_id for counter filename: {file_id!r}")
     return ctx.state_dir / f"{file_id}.opens.json"
@@ -70,6 +71,36 @@ def _local_read_count(ctx: PolicyContext, file_id: str) -> int:
         return 0
 
 
+def _lock_file(lock_file) -> None:
+    if os.name == "nt":
+        import msvcrt
+
+        lock_file.seek(0, os.SEEK_END)
+        if lock_file.tell() == 0:
+            lock_file.write("\0")
+            lock_file.flush()
+        lock_file.seek(0)
+        msvcrt.locking(lock_file.fileno(), msvcrt.LK_LOCK, 1)
+        return
+
+    import fcntl
+
+    fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX)
+
+
+def _unlock_file(lock_file) -> None:
+    if os.name == "nt":
+        import msvcrt
+
+        lock_file.seek(0)
+        msvcrt.locking(lock_file.fileno(), msvcrt.LK_UNLCK, 1)
+        return
+
+    import fcntl
+
+    fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)
+
+
 def _local_check_and_bump(ctx: PolicyContext, file_id: str, max_opens: int) -> int:
     """
     Atomically: check count < max_opens AND bump. Uses an OS file lock
@@ -78,14 +109,13 @@ def _local_check_and_bump(ctx: PolicyContext, file_id: str, max_opens: int) -> i
     Raises PolicyViolation if max_opens reached.
     Returns the new count.
     """
-    import fcntl  # POSIX only; Windows would need msvcrt.locking.
     import tempfile
 
     p = _local_counter_path(ctx, file_id)
     lock_path = p.with_suffix(".lock")
     # Open/create lock file, acquire exclusive lock for the critical section.
     with open(lock_path, "a+") as lf:
-        fcntl.flock(lf.fileno(), fcntl.LOCK_EX)
+        _lock_file(lf)
         try:
             cur = _local_read_count(ctx, file_id)
             if cur >= max_opens:
@@ -114,7 +144,7 @@ def _local_check_and_bump(ctx: PolicyContext, file_id: str, max_opens: int) -> i
                 raise
             return new_count
         finally:
-            fcntl.flock(lf.fileno(), fcntl.LOCK_UN)
+            _unlock_file(lf)
 
 
 def check_policy(manifest: Manifest, ctx: Optional[PolicyContext] = None) -> None:
@@ -166,5 +196,9 @@ def record_open(manifest: Manifest, ctx: Optional[PolicyContext]) -> int:
         return 0
     if ctx.mode == "LOCAL_ONLY":
         return _local_check_and_bump(ctx, manifest.file_id, int(mx))
-    # REGISTRY/HYBRID — caller should POST to registry /policy/open
-    return _local_check_and_bump(ctx, manifest.file_id, int(mx))
+    if ctx.mode in {"REGISTRY", "HYBRID"}:
+        raise PolicyViolation(
+            f"{ctx.mode} max_opens enforcement is not implemented; refusing "
+            "to fall back to LOCAL_ONLY state"
+        )
+    raise ValueError(f"unknown policy mode: {ctx.mode!r}")

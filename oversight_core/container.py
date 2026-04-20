@@ -181,10 +181,10 @@ def open_sealed(
       2. Verify manifest signature (Ed25519).
       3. If trusted_issuer_pubs provided, verify issuer is in set.
       4. Policy check (not_after, not_before, jurisdiction).
-      5. Atomically check-and-bump max_opens BEFORE any decryption.
-      6. Unwrap DEK (multi-recipient: try each slot).
-      7. AEAD decrypt with AAD = content_hash (binds ciphertext to manifest).
-      8. Post-decrypt SHA-256 check.
+      5. Unwrap DEK (multi-recipient: try each slot).
+      6. AEAD decrypt with AAD = content_hash (binds ciphertext to manifest).
+      7. Post-decrypt SHA-256 check.
+      8. Atomically check-and-bump max_opens after successful decryption.
     """
     from .policy import check_policy, record_open
 
@@ -206,10 +206,6 @@ def open_sealed(
 
     # Cheap, read-only policy checks (may raise PolicyViolation)
     check_policy(sf.manifest, policy_ctx)
-
-    # Atomically check-and-bump the open counter BEFORE any crypto work.
-    # If max_opens is exceeded this raises PolicyViolation and we never decrypt.
-    record_open(sf.manifest, policy_ctx)
 
     # Recover DEK. For multi-recipient files, wrapped_dek contains a 'slots'
     # list; we try each slot in turn. A "wrong key" exception is expected when
@@ -237,6 +233,9 @@ def open_sealed(
 
     if crypto.content_hash(plaintext) != sf.manifest.content_hash:
         raise ValueError("Plaintext hash does not match manifest")
+
+    # Count only successful opens by an authenticated recipient.
+    record_open(sf.manifest, policy_ctx)
 
     return plaintext, sf.manifest
 

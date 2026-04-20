@@ -12,6 +12,7 @@ Covers (no network):
   5. build_statement produces the expected in-toto v1 shape.
   6. Envelope JSON serialization is canonical (sorted keys, no whitespace).
   7. verify_inclusion_offline returns False when transparency_log_entry is empty.
+  8. verify_inclusion_offline rejects mismatched subject digests.
 
 Running this requires no external services; e2e Rekor tests live in
 test_rekor_e2e.py (added in v0.5 Session B).
@@ -65,9 +66,12 @@ def t2_sign_verify_roundtrip():
 def t3_tamper_payload_rejected():
     priv, pub = _new_keypair()
     pred = R.OversightRegistrationPredicate(
-        file_id="x", issuer_pubkey_ed25519=pub.hex(),
-        recipient_id="r", recipient_pubkey_sha256="00" * 32,
-        suite="s", registered_at="t",
+        file_id="x",
+        issuer_pubkey_ed25519=pub.hex(),
+        recipient_id="r",
+        recipient_pubkey_sha256="00" * 32,
+        suite="s",
+        registered_at="t",
     )
     env = R.sign_dsse(R.build_statement("a", "b", pred), priv)
     tampered = R.DSSEEnvelope(
@@ -83,9 +87,12 @@ def t4_wrong_key_rejected():
     priv, _ = _new_keypair()
     _, other_pub = _new_keypair()
     pred = R.OversightRegistrationPredicate(
-        file_id="x", issuer_pubkey_ed25519="zz",
-        recipient_id="r", recipient_pubkey_sha256="00" * 32,
-        suite="s", registered_at="t",
+        file_id="x",
+        issuer_pubkey_ed25519="zz",
+        recipient_id="r",
+        recipient_pubkey_sha256="00" * 32,
+        suite="s",
+        registered_at="t",
     )
     env = R.sign_dsse(R.build_statement("a", "b", pred), priv)
     assert not R.verify_dsse(env, other_pub), "wrong-key sig verified!"
@@ -94,9 +101,12 @@ def t4_wrong_key_rejected():
 
 def t5_statement_shape():
     pred = R.OversightRegistrationPredicate(
-        file_id="fid", issuer_pubkey_ed25519="pp",
-        recipient_id="rid", recipient_pubkey_sha256="rxhash",
-        suite="OSGT-CLASSIC-v1", registered_at="2026-04-19T00:00:00Z",
+        file_id="fid",
+        issuer_pubkey_ed25519="pp",
+        recipient_id="rid",
+        recipient_pubkey_sha256="rxhash",
+        suite="OSGT-CLASSIC-v1",
+        registered_at="2026-04-19T00:00:00Z",
     )
     s = R.build_statement("mark1234", "deadbeef" * 8, pred)
     assert s["_type"] == R.STATEMENT_TYPE
@@ -108,33 +118,50 @@ def t5_statement_shape():
 
 
 def t6_canonical_envelope_json():
-    priv, pub = _new_keypair()
+    priv, _ = _new_keypair()
     pred = R.OversightRegistrationPredicate(
-        file_id="x", issuer_pubkey_ed25519="pp",
-        recipient_id="r", recipient_pubkey_sha256="00" * 32,
-        suite="s", registered_at="t",
+        file_id="x",
+        issuer_pubkey_ed25519="pp",
+        recipient_id="r",
+        recipient_pubkey_sha256="00" * 32,
+        suite="s",
+        registered_at="t",
     )
     env = R.sign_dsse(R.build_statement("a", "b" * 32, pred), priv)
     raw = env.to_json()
-    # canonical: keys sorted alphabetically (payload, payloadType, signatures)
-    parsed_keys_in_order = [k for k in json.loads(raw).keys()]
-    # round-trip must produce identical bytes
     again = R.DSSEEnvelope.from_json(raw).to_json()
     assert raw == again, "envelope JSON not canonical (round-trip differs)"
-    # no whitespace
     assert " " not in raw and "\n" not in raw, "envelope JSON has whitespace"
     print("  [PASS] 6. envelope JSON is canonical and round-trip stable")
+
+
+def t7_offline_verify_rejects_empty_tle():
+    priv, pub = _new_keypair()
+    pred = R.OversightRegistrationPredicate(
+        file_id="x",
+        issuer_pubkey_ed25519="pp",
+        recipient_id="r",
+        recipient_pubkey_sha256="00" * 32,
+        suite="s",
+        registered_at="t",
+    )
+    env = R.sign_dsse(R.build_statement("a", "b" * 32, pred), priv)
+    ok, reason = R.verify_inclusion_offline({}, env, pub, "b" * 32)
+    assert not ok and "transparency_log_entry" in reason, reason
+    print(f"  [PASS] 7. offline verify rejects empty bundle ({reason})")
 
 
 def t8_recipient_pubkey_never_appears_raw():
     """Privacy: raw X25519 recipient key must never end up in the on-log payload."""
     priv, _ = _new_keypair()
-    raw_pub_hex = "11" * 32  # pretend recipient X25519 pub
+    raw_pub_hex = "11" * 32
     pred = R.OversightRegistrationPredicate(
-        file_id="x", issuer_pubkey_ed25519="pp",
+        file_id="x",
+        issuer_pubkey_ed25519="pp",
         recipient_id="r",
         recipient_pubkey_sha256=R.hash_recipient_pubkey(raw_pub_hex),
-        suite="s", registered_at="t",
+        suite="s",
+        registered_at="t",
     )
     stmt = R.build_statement("a", "b" * 32, pred)
     env = R.sign_dsse(stmt, priv)
@@ -147,9 +174,12 @@ def t8_recipient_pubkey_never_appears_raw():
 
 def t9_predicate_carries_version_int():
     pred = R.OversightRegistrationPredicate(
-        file_id="x", issuer_pubkey_ed25519="pp",
-        recipient_id="r", recipient_pubkey_sha256="00" * 32,
-        suite="s", registered_at="t",
+        file_id="x",
+        issuer_pubkey_ed25519="pp",
+        recipient_id="r",
+        recipient_pubkey_sha256="00" * 32,
+        suite="s",
+        registered_at="t",
     )
     d = pred.to_dict()
     assert d.get("predicate_version") == 1, d
@@ -158,19 +188,24 @@ def t9_predicate_carries_version_int():
 
 def t10_bundle_has_5year_replay_fields():
     """Bundle must carry log_pubkey, checkpoint, schema URI, schema int."""
-    priv, pub = _new_keypair()
+    priv, _ = _new_keypair()
     pred = R.OversightRegistrationPredicate(
-        file_id="x", issuer_pubkey_ed25519="pp",
-        recipient_id="r", recipient_pubkey_sha256="00" * 32,
-        suite="s", registered_at="t",
+        file_id="x",
+        issuer_pubkey_ed25519="pp",
+        recipient_id="r",
+        recipient_pubkey_sha256="00" * 32,
+        suite="s",
+        registered_at="t",
     )
     env = R.sign_dsse(R.build_statement("a", "b" * 32, pred), priv)
     upload = R.RekorUploadResult(
         log_url="https://log2025-1.rekor.sigstore.dev",
-        log_index=42, log_id="abc", integrated_time=1776600000,
+        log_index=42,
+        log_id="abc",
+        integrated_time=1776600000,
         transparency_log_entry={"logEntry": "..."},
         log_pubkey_pem="-----BEGIN PUBLIC KEY-----\nFAKE\n-----END PUBLIC KEY-----",
-        checkpoint="rekor.sigstore.dev\n42\nABC=\n— rekor sig...",
+        checkpoint="rekor.sigstore.dev\n42\nABC=\n-- rekor sig...",
     )
     bundle = R.build_bundle(
         manifest_dict={"file_id": "x"},
@@ -190,22 +225,30 @@ def t10_bundle_has_5year_replay_fields():
     print("  [PASS] 10. bundle carries log_pubkey + checkpoint + schema URI + schema=2")
 
 
-def t7_offline_verify_rejects_empty_tle():
+def t11_offline_verify_rejects_digest_mismatch():
     priv, pub = _new_keypair()
     pred = R.OversightRegistrationPredicate(
-        file_id="x", issuer_pubkey_ed25519="pp",
-        recipient_id="r", recipient_pubkey_sha256="00" * 32,
-        suite="s", registered_at="t",
+        file_id="x",
+        issuer_pubkey_ed25519="pp",
+        recipient_id="r",
+        recipient_pubkey_sha256="00" * 32,
+        suite="s",
+        registered_at="t",
     )
     env = R.sign_dsse(R.build_statement("a", "b" * 32, pred), priv)
-    ok, reason = R.verify_inclusion_offline({}, env, pub)
-    assert not ok and "transparency_log_entry" in reason, reason
-    print(f"  [PASS] 7. offline verify rejects empty bundle ({reason})")
+    ok, reason = R.verify_inclusion_offline(
+        {"transparency_log_entry": {"logEntry": {"kindVersion": {"kind": "dsse"}}}},
+        env,
+        pub,
+        "c" * 32,
+    )
+    assert not ok and "subject digest" in reason, reason
+    print(f"  [PASS] 11. offline verify rejects mismatched digest ({reason})")
 
 
 def main():
     print("=" * 60)
-    print("  oversight_core.rekor — unit tests (offline, no network)")
+    print("  oversight_core.rekor - unit tests (offline, no network)")
     print("=" * 60)
     t1_pae_byte_exact()
     t2_sign_verify_roundtrip()
@@ -217,8 +260,9 @@ def main():
     t8_recipient_pubkey_never_appears_raw()
     t9_predicate_carries_version_int()
     t10_bundle_has_5year_replay_fields()
+    t11_offline_verify_rejects_digest_mismatch()
     print()
-    print("  ALL TESTS PASSED — 10/10")
+    print("  ALL TESTS PASSED - 11/11")
     print()
 
 
