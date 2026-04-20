@@ -55,7 +55,7 @@ from oversight_core.fingerprint import ContentFingerprint
 # Constants
 # ---------------------------------------------------------------------------
 
-CLI_VERSION = "0.4.1"
+CLI_VERSION = "0.4.4"
 CONFIG_FILENAME = "config.json"
 CONFIG_DIR_NAME = ".oversight"
 

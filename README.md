@@ -93,6 +93,22 @@ The attribute command runs a 5-phase pipeline:
 4. **Multi-layer Bayesian fusion** combining all evidence into ranked candidates
 5. **Content fingerprint comparison** (winnowing + sentence hashing) as a last resort when all watermarks are stripped
 
+## What's new in v0.4.4
+
+**Security hardening over v0.4.3.** This line starts from the v0.4.3 Python
+package baseline and adds the 2026-04-20 review fixes from Codex (GPT-5.4).
+Use v0.4.4 or current `main` for the hardened behavior described below.
+
+**Signed evidence continuity.** Registry registration now stores only the
+beacons and watermarks that match the issuer-signed manifest, Rekor
+attestations index by real watermark IDs and actual content hashes, and the
+local transparency-log empty root matches RFC 6962.
+
+**Recipient-honest policy enforcement.** `max_opens` counts only successful
+recipient decryptions, Windows local counters work, registry-backed counter
+modes fail closed until implemented, and unsafe multi-recipient sealing is
+disabled until the manifest format can represent multiple recipients honestly.
+
 ## What's new in v0.4.3
 
 **Anti-stripping defenses.** ECC-protected synonym bits (R=7 repetition codes), winnowing content fingerprints, sentence-level content hashing, 25 spelling variant pairs, 30 contraction choices, number formatting marks. The VM-strip-export attack (open in airgapped VM, strip invisible chars, export clean file) is now defended by content fingerprinting.
@@ -104,6 +120,8 @@ The attribute command runs a 5-phase pipeline:
 See `CHANGELOG.md` for full version history.
 
 ## Security hardening
+
+These items are included in v0.4.4 and current `main`:
 
 - `max_opens` now counts only successful recipient decryptions, not failed key guesses.
 - `LOCAL_ONLY` open counters now work on Windows as well as POSIX hosts.

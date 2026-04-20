@@ -47,3 +47,4 @@ secrets/
 scratch/
 tmp/
 .tmp-tests/
+SESSION_*.md

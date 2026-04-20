@@ -1,6 +1,13 @@
 # Oversight CHANGELOG
 
-## Unreleased - 2026-04-20 security hardening
+## v0.4.4 - 2026-04-20 security hardening
+
+Security patch line started from the `v0.4.3` Python package baseline
+(`0b1a4ab`) and incorporates the Codex review fixes made on 2026-04-20.
+This is the current `main` download line. Historical `v0.5.0` Rekor/Rust
+work remains in git history and the Rust workspace, but the Python package
+metadata now intentionally advances from `0.4.3` to `0.4.4` so users do not
+confuse the hardened tree with the vulnerable `v0.4.3` baseline.
 
 - `oversight_core/container.py`: `max_opens` now increments only after a
   successful decrypt, and unsafe `seal_multi()` is disabled until the
@@ -15,10 +22,10 @@
   unsigned beacon / watermark sidecars that do not match the signed manifest.
 - `oversight_core/formats/text.py`: text adapter now applies L3 before L2/L1,
   matching the core watermark pipeline.
- - `oversight_core/tlog.py`: empty-tree roots now use the RFC 6962 Merkle
+- `oversight_core/tlog.py`: empty-tree roots now use the RFC 6962 Merkle
   hash (`SHA-256("")`) instead of an all-zero placeholder.
- - `oversight_core/__init__.py`: package `__version__` is back in sync with
-  `pyproject.toml`.
+- `oversight_core/__init__.py`, `pyproject.toml`, and the Rich CLI banner:
+  version metadata is now `0.4.4`, marking this post-`0.4.3` hardening train.
 - Added focused regression coverage in `tests/test_policy_unit.py`,
   `tests/test_registry_unit.py`, `tests/test_rekor_unit.py`,
   `tests/test_text_format_unit.py`, and `tests/test_tlog_unit.py`.

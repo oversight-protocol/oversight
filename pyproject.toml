@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "oversight-protocol"
-version = "0.4.3"
+version = "0.4.4"
 description = "Open protocol for cryptographic data provenance, recipient attribution, and leak detection."
 readme = "README.md"
 license = {text = "Apache-2.0"}
