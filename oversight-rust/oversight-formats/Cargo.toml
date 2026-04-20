@@ -1,0 +1,36 @@
+[package]
+name = "oversight-formats"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "Format-specific watermark adapters for Oversight (text, PDF, DOCX, image)"
+
+[dependencies]
+# Workspace crates — watermarking + semantic layers
+oversight-watermark = { path = "../oversight-watermark" }
+oversight-semantic = { path = "../oversight-semantic" }
+
+# Workspace deps
+sha2.workspace = true
+thiserror.workspace = true
+hex.workspace = true
+
+# PDF manipulation
+lopdf = { version = "0.34", optional = true }
+
+# DOCX (OOXML): zip for container, quick-xml for XML parsing
+zip = { version = "2", default-features = false, features = ["deflate"], optional = true }
+quick-xml = { version = "0.36", features = ["serialize"], optional = true }
+
+# Image pixel access
+image = { version = "0.25", default-features = false, features = ["png", "jpeg"], optional = true }
+
+[features]
+default = ["text", "pdf", "docx", "image_fmt"]
+text = []
+pdf = ["dep:lopdf"]
+docx = ["dep:zip", "dep:quick-xml"]
+image_fmt = ["dep:image"]
+
+[dev-dependencies]

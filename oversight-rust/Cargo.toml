@@ -8,8 +8,10 @@ members = [
     "oversight-tlog",
     "oversight-policy",
     "oversight-semantic",
+    "oversight-formats",
     "oversight-cli",
     "oversight-rekor",
+    "oversight-registry",
 ]
 exclude = ["fuzz"]
 

@@ -1,0 +1,44 @@
+[package]
+name = "oversight-registry"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "Axum + SQLx attribution registry server for the Oversight Protocol"
+
+[[bin]]
+name = "oversight-registry"
+path = "src/main.rs"
+
+[dependencies]
+# Workspace crates
+oversight-crypto = { path = "../oversight-crypto" }
+oversight-manifest = { path = "../oversight-manifest" }
+oversight-tlog = { path = "../oversight-tlog" }
+oversight-rekor = { path = "../oversight-rekor", features = ["upload"] }
+
+# Workspace deps
+serde.workspace = true
+serde_json.workspace = true
+serde_jcs.workspace = true
+hex.workspace = true
+thiserror.workspace = true
+ed25519-dalek.workspace = true
+sha2.workspace = true
+rand_core = { workspace = true, features = ["getrandom"] }
+
+# Web framework
+axum = { version = "0.7", features = ["macros"] }
+tokio = { version = "1", features = ["full"] }
+tower = { version = "0.4" }
+tower-http = { version = "0.5", features = ["cors", "trace"] }
+
+# Database
+sqlx = { version = "0.7", features = ["runtime-tokio", "sqlite"] }
+
+# Utilities
+clap = { workspace = true }
+anyhow = "1"
+chrono = { version = "0.4", features = ["serde"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }

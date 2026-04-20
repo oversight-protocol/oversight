@@ -1,6 +1,6 @@
 //! # oversight CLI
 //!
-//! `oversight keygen | seal | open | inspect` for Oversight sealed files.
+//! `oversight keygen | seal | open | inspect | watermark | detect-format` for Oversight sealed files.
 
 use std::path::PathBuf;
 use std::process::ExitCode;
@@ -8,6 +8,7 @@ use std::process::ExitCode;
 use clap::{Parser, Subcommand};
 use oversight_container::{open_sealed, seal, SealedFile};
 use oversight_crypto::{self as crypto, ClassicIdentity};
+use oversight_formats::{FormatAdapter, FormatRegistry};
 use oversight_manifest::{Manifest, Recipient};
 
 #[derive(Parser)]
@@ -72,6 +73,43 @@ enum Commands {
 
     /// Print the signed manifest + structural metadata of a sealed file
     Inspect {
+        #[arg(short, long)]
+        input: PathBuf,
+    },
+
+    /// Embed a watermark into a file (auto-detects format)
+    Watermark {
+        /// Input file
+        #[arg(short, long)]
+        input: PathBuf,
+
+        /// Output file (watermarked)
+        #[arg(short, long)]
+        output: PathBuf,
+
+        /// Mark ID (hex). If omitted, generates a random 8-byte ID.
+        #[arg(short, long)]
+        mark_id: Option<String>,
+
+        /// Force a specific format adapter (text, pdf, docx, image)
+        #[arg(short, long)]
+        format: Option<String>,
+    },
+
+    /// Extract watermarks from a file (auto-detects format)
+    Extract {
+        /// Input file to scan for watermarks
+        #[arg(short, long)]
+        input: PathBuf,
+
+        /// Force a specific format adapter
+        #[arg(short, long)]
+        format: Option<String>,
+    },
+
+    /// Detect the format of a file and list available adapters
+    DetectFormat {
+        /// Input file to detect
         #[arg(short, long)]
         input: PathBuf,
     },
@@ -207,8 +245,126 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             println!("  aead_nonce:      {}", hex::encode(sf.aead_nonce));
             println!("  signature valid: {}", sf.manifest.verify().unwrap_or(false));
         }
+
+        Commands::Watermark {
+            input,
+            output,
+            mark_id,
+            format,
+        } => {
+            let data = std::fs::read(&input)?;
+            let registry = FormatRegistry::default();
+
+            let adapter = resolve_adapter(&registry, &data, format.as_deref(), &input)?;
+            let mark_bytes = match mark_id {
+                Some(hex_str) => hex::decode(&hex_str)?,
+                None => {
+                    let id = oversight_watermark::new_mark_id(8);
+                    eprintln!("  generated mark_id: {}", hex::encode(&id));
+                    id
+                }
+            };
+
+            let marked = adapter.embed_watermark(&data, &mark_bytes)
+                .map_err(|e| format!("embed failed: {}", e))?;
+            std::fs::write(&output, &marked)?;
+            println!(
+                "watermarked {} -> {} ({} bytes, format: {})",
+                input.display(),
+                output.display(),
+                marked.len(),
+                adapter.name()
+            );
+            println!("  mark_id: {}", hex::encode(&mark_bytes));
+        }
+
+        Commands::Extract { input, format } => {
+            let data = std::fs::read(&input)?;
+            let registry = FormatRegistry::default();
+
+            let adapter = resolve_adapter(&registry, &data, format.as_deref(), &input)?;
+            let candidates = adapter.extract_watermark(&data)
+                .map_err(|e| format!("extract failed: {}", e))?;
+
+            println!(
+                "=== Watermark extraction: {} (format: {}) ===",
+                input.display(),
+                adapter.name()
+            );
+            if candidates.is_empty() {
+                println!("  no watermarks found");
+            } else {
+                for (i, c) in candidates.iter().enumerate() {
+                    println!(
+                        "  [{}] layer={}, mark_id={}, confidence={:.3}",
+                        i,
+                        c.layer,
+                        hex::encode(&c.mark_id),
+                        c.confidence
+                    );
+                }
+            }
+        }
+
+        Commands::DetectFormat { input } => {
+            let data = std::fs::read(&input)?;
+            let registry = FormatRegistry::default();
+
+            println!("=== Format detection: {} ===", input.display());
+            println!("  file size: {} bytes", data.len());
+
+            if let Some(adapter) = registry.detect(&data) {
+                println!("  detected:  {}", adapter.name());
+                println!("  extensions: {:?}", adapter.extensions());
+            } else {
+                println!("  detected:  (unknown)");
+            }
+
+            // Also try extension-based lookup
+            if let Some(ext) = input.extension().and_then(|e| e.to_str()) {
+                if let Some(adapter) = registry.by_extension(ext) {
+                    println!("  by extension .{}: {}", ext, adapter.name());
+                }
+            }
+
+            println!("  available adapters: {:?}", registry.adapter_names());
+        }
     }
     Ok(())
+}
+
+/// Resolve which format adapter to use: explicit --format flag, or auto-detect
+/// from file content (preferred) or extension (fallback).
+fn resolve_adapter<'a>(
+    registry: &'a FormatRegistry,
+    data: &[u8],
+    format_override: Option<&str>,
+    path: &PathBuf,
+) -> Result<&'a dyn FormatAdapter, Box<dyn std::error::Error>> {
+    if let Some(name) = format_override {
+        return registry
+            .by_name(name)
+            .ok_or_else(|| format!("unknown format: '{}'. available: {:?}", name, registry.adapter_names()).into());
+    }
+
+    // Try content-based detection first
+    if let Some(adapter) = registry.detect(data) {
+        return Ok(adapter);
+    }
+
+    // Fall back to extension
+    if let Some(ext) = path.extension().and_then(|e| e.to_str()) {
+        if let Some(adapter) = registry.by_extension(ext) {
+            return Ok(adapter);
+        }
+    }
+
+    Err(format!(
+        "could not detect format for '{}'. use --format to specify. available: {:?}",
+        path.display(),
+        registry.adapter_names()
+    )
+    .into())
 }
 
 fn main() -> ExitCode {
