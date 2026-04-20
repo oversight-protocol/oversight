@@ -11,7 +11,7 @@
 //! Higher-fidelity layers (semantic synonym rotation, DCT image watermarks,
 //! PDF/DOCX metadata) live in separate crates so each can evolve independently.
 
-use rand::{rngs::OsRng, RngCore};
+use rand_core::{OsRng, RngCore};
 
 pub const ZW_SPACE: char = '\u{200b}'; // bit 0
 pub const ZW_NONJOIN: char = '\u{200c}'; // bit 1

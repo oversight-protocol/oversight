@@ -30,7 +30,6 @@ ed25519-dalek = { version = "2", features = ["rand_core"] }
 chacha20poly1305 = { version = "0.10", features = ["alloc"] }
 hkdf = "0.12"
 sha2 = "0.10"
-rand = "0.8"
 rand_core = "0.6"
 
 # Serialization / encoding

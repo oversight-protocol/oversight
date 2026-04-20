@@ -32,6 +32,7 @@ from __future__ import annotations
 
 import argparse
 import logging
+import os
 import sys
 import time
 from pathlib import Path
@@ -52,10 +53,17 @@ log = logging.getLogger("oversight_dns")
 class OversightResolver(BaseResolver):
     """Resolves queries matching <token_id>.t.<beacon_domain> and logs them."""
 
-    def __init__(self, beacon_domain: str, registry_url: str, answer_ip: str):
+    def __init__(
+        self,
+        beacon_domain: str,
+        registry_url: str,
+        answer_ip: str,
+        registry_secret: str = "",
+    ):
         self.beacon_domain = beacon_domain.rstrip(".").lower()
         self.registry_url = registry_url.rstrip("/")
         self.answer_ip = answer_ip
+        self.registry_secret = registry_secret
         self.token_suffix = f".t.{self.beacon_domain}"
 
     def resolve(self, request, handler):
@@ -77,6 +85,9 @@ class OversightResolver(BaseResolver):
             log.info(f"DNS beacon fired: token={token_id[:16]}... client={client_ip} qtype={qtype}")
             # Report to registry asynchronously (best-effort — we still answer the query)
             try:
+                headers = {}
+                if self.registry_secret:
+                    headers["X-Oversight-DNS-Secret"] = self.registry_secret
                 httpx.post(
                     f"{self.registry_url}/dns_event",
                     json={
@@ -85,6 +96,7 @@ class OversightResolver(BaseResolver):
                         "qtype": qtype,
                         "qname": qname,
                     },
+                    headers=headers,
                     timeout=2.0,
                 )
             except Exception as e:
@@ -106,6 +118,8 @@ def main():
                    help="URL of the OVERSIGHT registry, e.g. http://localhost:8765")
     p.add_argument("--answer-ip", required=True,
                    help="A-record answer IP (usually this server's public IP)")
+    p.add_argument("--registry-secret", default=os.environ.get("OVERSIGHT_DNS_EVENT_SECRET", ""),
+                   help="shared secret sent to registry /dns_event")
     p.add_argument("--port", type=int, default=53)
     p.add_argument("--address", default="0.0.0.0")
     p.add_argument("--log-level", default="INFO")
@@ -114,7 +128,15 @@ def main():
     logging.basicConfig(level=args.log_level,
                         format="%(asctime)s %(levelname)s %(name)s %(message)s")
 
-    resolver = OversightResolver(args.beacon_domain, args.registry_url, args.answer_ip)
+    if not args.registry_secret and "localhost" not in args.registry_url and "127.0.0.1" not in args.registry_url:
+        log.warning("no registry secret configured; public registry callbacks may be rejected")
+
+    resolver = OversightResolver(
+        args.beacon_domain,
+        args.registry_url,
+        args.answer_ip,
+        registry_secret=args.registry_secret,
+    )
     server = DNSServer(resolver, port=args.port, address=args.address,
                        tcp=False)
     tcp_server = DNSServer(resolver, port=args.port, address=args.address,

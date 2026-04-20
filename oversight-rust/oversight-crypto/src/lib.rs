@@ -33,8 +33,7 @@ use ed25519_dalek::{
     VerifyingKey as EdVerifyingKey,
 };
 use hkdf::Hkdf;
-use rand::rngs::OsRng;
-use rand_core::RngCore;
+use rand_core::{OsRng, RngCore};
 use sha2::{Digest, Sha256};
 use thiserror::Error;
 use x25519_dalek::{PublicKey as X25519PublicKey, StaticSecret as X25519StaticSecret};

@@ -26,6 +26,13 @@ confuse the hardened tree with the vulnerable `v0.4.3` baseline.
   hash (`SHA-256("")`) instead of an all-zero placeholder.
 - `oversight_core/__init__.py`, `pyproject.toml`, and the Rich CLI banner:
   version metadata is now `0.4.4`, marking this post-`0.4.3` hardening train.
+- `oversight_dns/server.py` and `registry/server.py`: DNS beacon callbacks now
+  support a shared `OVERSIGHT_DNS_EVENT_SECRET`, and non-loopback callbacks
+  fail closed when no secret is configured.
+- `registry/server.py`: evidence bundles now include local transparency-log
+  inclusion proofs for recorded events, not just the signed tree head.
+- `oversight-rust`: removed the direct `rand` dependency in favor of
+  `rand_core::OsRng`, clearing the low-severity `rand` advisory path.
 - Added focused regression coverage in `tests/test_policy_unit.py`,
   `tests/test_registry_unit.py`, `tests/test_rekor_unit.py`,
   `tests/test_text_format_unit.py`, and `tests/test_tlog_unit.py`.

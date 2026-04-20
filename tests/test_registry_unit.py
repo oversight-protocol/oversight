@@ -9,7 +9,10 @@ from __future__ import annotations
 import base64
 import json
 import os
+import shutil
 import sys
+import uuid
+from types import SimpleNamespace
 
 ROOT = os.path.join(os.path.dirname(__file__), "..")
 sys.path.insert(0, ROOT)
@@ -19,6 +22,7 @@ from cryptography.hazmat.primitives import serialization
 
 import registry.server as registry_server
 from fastapi import HTTPException
+from oversight_core.tlog import TransparencyLog
 
 
 def _new_identity() -> dict:
@@ -123,14 +127,76 @@ def t2_register_rejects_unsigned_sidecar_mismatch():
     print("  [PASS] register rejects unsigned beacon/watermark sidecars")
 
 
+def _fake_request(host: str, headers: dict[str, str] | None = None):
+    return SimpleNamespace(
+        client=SimpleNamespace(host=host),
+        headers=headers or {},
+    )
+
+
+def t3_dns_event_requires_secret_for_non_loopback():
+    original_secret = registry_server.DNS_EVENT_SECRET
+    try:
+        registry_server.DNS_EVENT_SECRET = ""
+        registry_server._verify_dns_event_auth(_fake_request("127.0.0.1"))
+        try:
+            registry_server._verify_dns_event_auth(_fake_request("203.0.113.10"))
+        except HTTPException as exc:
+            assert exc.status_code == 503
+            assert "OVERSIGHT_DNS_EVENT_SECRET" in exc.detail
+        else:
+            raise AssertionError("public DNS callbacks should fail closed without a secret")
+
+        registry_server.DNS_EVENT_SECRET = "shared-secret"
+        registry_server._verify_dns_event_auth(
+            _fake_request("203.0.113.10", {"x-oversight-dns-secret": "shared-secret"})
+        )
+        try:
+            registry_server._verify_dns_event_auth(
+                _fake_request("203.0.113.10", {"x-oversight-dns-secret": "wrong"})
+            )
+        except HTTPException as exc:
+            assert exc.status_code == 401
+        else:
+            raise AssertionError("wrong DNS callback secret should be rejected")
+    finally:
+        registry_server.DNS_EVENT_SECRET = original_secret
+    print("  [PASS] dns_event rejects unauthenticated non-loopback callbacks")
+
+
+def t4_evidence_bundle_can_attach_tlog_proofs():
+    original_tlog = registry_server.TLOG
+    td = os.path.join(ROOT, ".tmp-tests", f"registry-tlog-{uuid.uuid4().hex}")
+    os.makedirs(td, exist_ok=False)
+    try:
+        registry_server.TLOG = TransparencyLog(td)
+        first = registry_server.TLOG.append({"event": "register", "file_id": "f"})
+        second = registry_server.TLOG.append({"event": "beacon", "file_id": "f"})
+        proofs = registry_server._tlog_proofs_for_events([
+            {"kind": "register", "tlog_index": first},
+            {"kind": "beacon", "tlog_index": second},
+            {"kind": "offline", "tlog_index": -1},
+        ])
+    finally:
+        registry_server.TLOG = original_tlog
+        shutil.rmtree(td, ignore_errors=True)
+
+    assert [p["event_row"] for p in proofs] == [0, 1]
+    assert [p["tlog_index"] for p in proofs] == [first, second]
+    assert all(p["proof"]["root"] for p in proofs)
+    print("  [PASS] evidence bundles attach tlog inclusion proofs for events")
+
+
 def main():
     print("=" * 60)
     print("  registry.server - focused unit tests")
     print("=" * 60)
     t1_rekor_attestation_uses_real_mark_id_and_digest()
     t2_register_rejects_unsigned_sidecar_mismatch()
+    t3_dns_event_requires_secret_for_non_loopback()
+    t4_evidence_bundle_can_attach_tlog_proofs()
     print()
-    print("  ALL TESTS PASSED - 2/2")
+    print("  ALL TESTS PASSED - 4/4")
 
 
 if __name__ == "__main__":

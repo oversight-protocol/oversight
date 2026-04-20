@@ -20,6 +20,8 @@ import sqlite3
 import sys
 import threading
 import time
+import hmac
+import ipaddress
 from collections import OrderedDict
 from contextlib import asynccontextmanager, contextmanager
 from pathlib import Path
@@ -45,6 +47,7 @@ TLOG_DIR = DATA_DIR / "tlog"
 IDENTITY_PATH = DATA_DIR / "registry-identity.json"
 TRUSTED_PROXY = bool(int(os.environ.get("TRUSTED_PROXY", "0")))
 # When TRUSTED_PROXY=1, honor X-Forwarded-For for rate limiting.
+DNS_EVENT_SECRET = os.environ.get("OVERSIGHT_DNS_EVENT_SECRET", "")
 
 # Rekor v2 wiring (v0.5 Session B). Off by default so existing tests do not
 # generate live network traffic. Set OVERSIGHT_REKOR_ENABLED=1 to opt in.
@@ -262,6 +265,31 @@ def _append_tlog(event: dict) -> int:
     return TLOG.append(event) if TLOG else -1
 
 
+def _tlog_proofs_for_events(events: list[dict]) -> list[dict]:
+    """Attach inclusion proofs for event rows that have local tlog indexes."""
+    if not TLOG:
+        return []
+    proofs = []
+    for i, event in enumerate(events):
+        idx = event.get("tlog_index")
+        if idx is None:
+            continue
+        try:
+            idx = int(idx)
+        except (TypeError, ValueError):
+            continue
+        if idx < 0:
+            continue
+        proof = TLOG.inclusion_proof(idx)
+        if proof is not None:
+            proofs.append({
+                "event_row": i,
+                "tlog_index": idx,
+                "proof": proof,
+            })
+    return proofs
+
+
 def _attest_to_rekor(
     file_id: str,
     issuer_pub_hex: str,
@@ -339,6 +367,38 @@ def _attest_to_rekor(
 def _rate_limit(request: Request):
     if not BUCKET.allow(_client_key(request)):
         raise HTTPException(429, "rate limit exceeded")
+
+
+def _is_loopback_host(host: Optional[str]) -> bool:
+    if not host:
+        return False
+    try:
+        return ipaddress.ip_address(host).is_loopback
+    except ValueError:
+        return host in {"localhost", "testclient"}
+
+
+def _verify_dns_event_auth(request: Request):
+    """Authenticate DNS bridge callbacks before trusting client_ip in the body."""
+    if DNS_EVENT_SECRET:
+        supplied = request.headers.get("x-oversight-dns-secret", "")
+        if not supplied:
+            auth = request.headers.get("authorization", "")
+            if auth.lower().startswith("bearer "):
+                supplied = auth[7:].strip()
+        if hmac.compare_digest(supplied, DNS_EVENT_SECRET):
+            return
+        raise HTTPException(401, "invalid DNS event secret")
+
+    # Local same-host deployments are acceptable without a shared secret; public
+    # deployments must set OVERSIGHT_DNS_EVENT_SECRET to prevent spoofed events.
+    host = request.client.host if request.client else None
+    if _is_loopback_host(host):
+        return
+    raise HTTPException(
+        503,
+        "OVERSIGHT_DNS_EVENT_SECRET is required for non-loopback DNS event callbacks",
+    )
 
 
 def _verify_manifest_signature(manifest_dict: dict) -> tuple[bool, str]:
@@ -615,6 +675,7 @@ def evidence_bundle(file_id: str):
             "SELECT * FROM watermarks WHERE file_id=?", (file_id,)
         ).fetchall()
 
+    event_dicts = [dict(e) for e in events]
     bundle = {
         "file_id": file_id,
         "bundle_generated_at": timestamp_stub(),
@@ -622,8 +683,9 @@ def evidence_bundle(file_id: str):
         "manifest": json.loads(m["manifest_json"]),
         "beacons": [dict(b) for b in beacons],
         "watermarks": [dict(w) for w in watermarks],
-        "events": [dict(e) for e in events],
+        "events": event_dicts,
         "tlog_head": TLOG.signed_head() if TLOG else None,
+        "tlog_proofs": _tlog_proofs_for_events(event_dicts),
         "disclaimer": (
             "This bundle is a provenance record, not a legal finding. For court use, "
             "supplement with RFC 3161 qualified timestamps and ISO/IEC 27037 chain-of-custody."
@@ -686,6 +748,7 @@ class DnsEvent(BaseModel):
 def dns_event(evt: DnsEvent, request: Request):
     """Called by the oversight_dns server when a beacon DNS query arrives."""
     _rate_limit(request)
+    _verify_dns_event_auth(request)
     with db() as con:
         row = con.execute(
             "SELECT file_id, recipient_id, issuer_id FROM beacons WHERE token_id=?",
