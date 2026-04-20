@@ -110,7 +110,9 @@ See `CHANGELOG.md` for full version history.
 - `REGISTRY` and `HYBRID` policy modes fail closed instead of silently falling back to local counters.
 - Rekor offline verification now checks the attested digest against the expected content hash.
 - Registry Rekor attestations now index by real watermark mark IDs and the manifest's actual `content_hash`.
+- Registry registration now refuses unsigned beacon/watermark sidecars that do not match the issuer-signed manifest.
 - Multi-recipient sealing is disabled until a recipient-honest manifest format lands.
+- Local transparency-log empty-tree roots now match RFC 6962 exactly.
 
 ## Repository layout
 

@@ -355,6 +355,29 @@ def _verify_manifest_signature(manifest_dict: dict) -> tuple[bool, str]:
     return m.verify(), m.issuer_ed25519_pub
 
 
+def _canonical_items(items: list[dict]) -> list[str]:
+    """Normalize registration sidecars for exact signed-manifest comparison."""
+    return sorted(
+        json.dumps(item, sort_keys=True, separators=(",", ":"))
+        for item in items
+    )
+
+
+def _signed_registration_artifacts(
+    manifest_dict: dict,
+    req_beacons: list[dict],
+    req_watermarks: list[dict],
+) -> tuple[list[dict], list[dict]]:
+    """Use the manifest's signed beacons/watermarks as the registry source of truth."""
+    signed_beacons = manifest_dict.get("beacons") or []
+    signed_watermarks = manifest_dict.get("watermarks") or []
+    if _canonical_items(req_beacons) != _canonical_items(signed_beacons):
+        raise HTTPException(400, "request beacons do not match signed manifest")
+    if _canonical_items(req_watermarks) != _canonical_items(signed_watermarks):
+        raise HTTPException(400, "request watermarks do not match signed manifest")
+    return signed_beacons, signed_watermarks
+
+
 @app.post("/register")
 def register(req: RegistrationRequest, request: Request):
     """
@@ -383,6 +406,11 @@ def register(req: RegistrationRequest, request: Request):
         raise HTTPException(400, "manifest signature invalid")
     if not issuer_pub:
         raise HTTPException(400, "manifest missing issuer_ed25519_pub")
+    signed_beacons, signed_watermarks = _signed_registration_artifacts(
+        m,
+        req.beacons,
+        req.watermarks,
+    )
 
     now = int(time.time())
     with db() as con:
@@ -401,12 +429,12 @@ def register(req: RegistrationRequest, request: Request):
             "INSERT OR REPLACE INTO manifests VALUES (?,?,?,?,?,?)",
             (file_id, recipient_id, issuer_id, issuer_pub, json.dumps(m), now),
         )
-        for b in req.beacons:
+        for b in signed_beacons:
             con.execute(
                 "INSERT OR REPLACE INTO beacons VALUES (?,?,?,?,?,?)",
                 (b["token_id"], file_id, recipient_id, issuer_id, b["kind"], now),
             )
-        for w in req.watermarks:
+        for w in signed_watermarks:
             con.execute(
                 "INSERT OR REPLACE INTO watermarks VALUES (?,?,?,?,?,?)",
                 (w["mark_id"], w["layer"], file_id, recipient_id, issuer_id, now),
@@ -425,8 +453,8 @@ def register(req: RegistrationRequest, request: Request):
         "recipient_id": recipient_id,
         "issuer_id": issuer_id,
         "issuer_pub": issuer_pub,
-        "n_beacons": len(req.beacons),
-        "n_watermarks": len(req.watermarks),
+        "n_beacons": len(signed_beacons),
+        "n_watermarks": len(signed_watermarks),
         "timestamp": timestamp_stub(),
     })
 
@@ -437,9 +465,9 @@ def register(req: RegistrationRequest, request: Request):
         recipient_pubkey_hex=recipient.get("x25519_pub"),
         suite=m.get("suite", "classic"),
         content_hash_sha256_hex=m.get("content_hash", "0" * 64),
-        watermarks=req.watermarks,
+        watermarks=signed_watermarks,
         mark_id_hex=next(
-            (w["mark_id"] for w in req.watermarks if w.get("mark_id")),
+            (w["mark_id"] for w in signed_watermarks if w.get("mark_id")),
             file_id,
         ),
     )
@@ -447,7 +475,7 @@ def register(req: RegistrationRequest, request: Request):
     return {
         "ok": True,
         "file_id": file_id,
-        "registered_beacons": len(req.beacons),
+        "registered_beacons": len(signed_beacons),
         "tlog_index": tlog_idx,
         "rekor": rekor_result,
     }

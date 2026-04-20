@@ -7,7 +7,8 @@ Focused policy/container checks around successful-open counting.
 from __future__ import annotations
 
 import sys
-import tempfile
+import shutil
+import uuid
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -26,6 +27,10 @@ from oversight_core.policy import PolicyContext, PolicyViolation, record_open
 
 def ok(msg):
     print(f"  [PASS] {msg}")
+
+
+TMP_ROOT = ROOT / ".tmp-tests"
+TMP_ROOT.mkdir(exist_ok=True)
 
 
 def t1_wrong_recipient_does_not_consume_open_count():
@@ -51,8 +56,10 @@ def t1_wrong_recipient_does_not_consume_open_count():
     manifest.policy["max_opens"] = 1
     blob = seal(plaintext, manifest, issuer.ed25519_priv, alice.x25519_pub)
 
-    with tempfile.TemporaryDirectory() as td:
-        ctx = PolicyContext(state_dir=Path(td), mode="LOCAL_ONLY")
+    td = TMP_ROOT / f"policy-{uuid.uuid4().hex}"
+    td.mkdir(parents=True, exist_ok=False)
+    try:
+        ctx = PolicyContext(state_dir=td, mode="LOCAL_ONLY")
         try:
             open_sealed(blob, bob.x25519_priv, policy_ctx=ctx)
         except Exception:
@@ -63,6 +70,8 @@ def t1_wrong_recipient_does_not_consume_open_count():
         recovered, _ = open_sealed(blob, alice.x25519_priv, policy_ctx=ctx)
         assert recovered == plaintext
         ok("wrong recipient attempts do not consume max_opens")
+    finally:
+        shutil.rmtree(td, ignore_errors=True)
 
 
 def t2_registry_modes_fail_closed():

@@ -46,3 +46,4 @@ secrets/
 *.log
 scratch/
 tmp/
+.tmp-tests/

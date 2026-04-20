@@ -11,12 +11,17 @@
 - `oversight_core/rekor.py`: offline verification now rejects DSSE envelopes
   whose subject digest does not match the expected content hash.
 - `registry/server.py`: Rekor attestations now use real watermark mark IDs
-  and the manifest's actual `content_hash`.
+  and the manifest's actual `content_hash`, and `/register` now rejects
+  unsigned beacon / watermark sidecars that do not match the signed manifest.
 - `oversight_core/formats/text.py`: text adapter now applies L3 before L2/L1,
   matching the core watermark pipeline.
+ - `oversight_core/tlog.py`: empty-tree roots now use the RFC 6962 Merkle
+  hash (`SHA-256("")`) instead of an all-zero placeholder.
+ - `oversight_core/__init__.py`: package `__version__` is back in sync with
+  `pyproject.toml`.
 - Added focused regression coverage in `tests/test_policy_unit.py`,
-  `tests/test_registry_unit.py`, `tests/test_rekor_unit.py`, and
-  `tests/test_text_format_unit.py`.
+  `tests/test_registry_unit.py`, `tests/test_rekor_unit.py`,
+  `tests/test_text_format_unit.py`, and `tests/test_tlog_unit.py`.
 
 ## v0.5.0 — 2026-04-19
 

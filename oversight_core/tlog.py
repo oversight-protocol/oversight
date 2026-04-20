@@ -159,7 +159,7 @@ class TransparencyLog:
             if self._cached_root is not None:
                 return self._cached_root
             if not self._leaves:
-                self._cached_root = b"\x00" * 32
+                self._cached_root = _h(b"")
                 return self._cached_root
             self._cached_root = _rfc6962_mth(self._leaves)
             return self._cached_root

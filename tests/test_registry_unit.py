@@ -18,6 +18,7 @@ from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 from cryptography.hazmat.primitives import serialization
 
 import registry.server as registry_server
+from fastapi import HTTPException
 
 
 def _new_identity() -> dict:
@@ -83,13 +84,53 @@ def t1_rekor_attestation_uses_real_mark_id_and_digest():
     print("  [PASS] registry attests using a real mark_id and content_hash")
 
 
+def t2_register_rejects_unsigned_sidecar_mismatch():
+    manifest = {
+        "beacons": [
+            {"token_id": "tok-1", "kind": "http_img", "url": "https://b.example/p/tok-1.png"},
+        ],
+        "watermarks": [
+            {"layer": "L1_zero_width", "mark_id": "10" * 16},
+        ],
+    }
+    try:
+        registry_server._signed_registration_artifacts(
+            manifest,
+            req_beacons=[
+                {"token_id": "tok-evil", "kind": "http_img", "url": "https://b.example/p/tok-evil.png"},
+            ],
+            req_watermarks=manifest["watermarks"],
+        )
+    except HTTPException as exc:
+        assert exc.status_code == 400
+        assert "beacons do not match" in exc.detail
+    else:
+        raise AssertionError("unsigned request beacons should be rejected")
+
+    try:
+        registry_server._signed_registration_artifacts(
+            manifest,
+            req_beacons=manifest["beacons"],
+            req_watermarks=[
+                {"layer": "L2_whitespace", "mark_id": "20" * 16},
+            ],
+        )
+    except HTTPException as exc:
+        assert exc.status_code == 400
+        assert "watermarks do not match" in exc.detail
+    else:
+        raise AssertionError("unsigned request watermarks should be rejected")
+    print("  [PASS] register rejects unsigned beacon/watermark sidecars")
+
+
 def main():
     print("=" * 60)
     print("  registry.server - focused unit tests")
     print("=" * 60)
     t1_rekor_attestation_uses_real_mark_id_and_digest()
+    t2_register_rejects_unsigned_sidecar_mismatch()
     print()
-    print("  ALL TESTS PASSED - 1/1")
+    print("  ALL TESTS PASSED - 2/2")
 
 
 if __name__ == "__main__":
