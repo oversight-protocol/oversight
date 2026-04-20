@@ -1,5 +1,23 @@
 # Oversight CHANGELOG
 
+## Unreleased - 2026-04-20 security hardening
+
+- `oversight_core/container.py`: `max_opens` now increments only after a
+  successful decrypt, and unsafe `seal_multi()` is disabled until the
+  manifest format can honestly represent multiple recipients.
+- `oversight_core/policy.py`: `LOCAL_ONLY` counter locking now works on
+  Windows, and `REGISTRY` / `HYBRID` fail closed instead of silently using
+  local state.
+- `oversight_core/rekor.py`: offline verification now rejects DSSE envelopes
+  whose subject digest does not match the expected content hash.
+- `registry/server.py`: Rekor attestations now use real watermark mark IDs
+  and the manifest's actual `content_hash`.
+- `oversight_core/formats/text.py`: text adapter now applies L3 before L2/L1,
+  matching the core watermark pipeline.
+- Added focused regression coverage in `tests/test_policy_unit.py`,
+  `tests/test_registry_unit.py`, `tests/test_rekor_unit.py`, and
+  `tests/test_text_format_unit.py`.
+
 ## v0.5.0 — 2026-04-19
 
 First release with public-Rekor attestations. Now hosted at

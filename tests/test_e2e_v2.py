@@ -9,7 +9,7 @@ Covers:
    4. PDF metadata marks
    5. DOCX metadata marks
    6. Seal + open (single recipient)
-   7. Multi-recipient seal
+  7. Multi-recipient seal fails closed
    8. Policy enforcement (not_after expired)
    9. Policy enforcement (max_opens counter)
   10. Semantic watermark verification (airgap-strip survivor)
@@ -209,26 +209,16 @@ def main():
         fail("recovered plaintext mismatch")
     ok(f"seal/open round-trip OK ({len(blob)} bytes)")
 
-    banner("8. Multi-recipient seal")
+    banner("8. Multi-recipient seal fails closed")
     m2 = Manifest.new("multi.txt", content_hash(plaintext), len(plaintext), "acme", issuer.ed25519_pub.hex(), rec, "http://localhost:8765", "text/plain")
-    multi_blob = seal_multi(
-        plaintext, m2, issuer.ed25519_priv,
-        [alice.x25519_pub, bob.x25519_pub, carol.x25519_pub],
-    )
-    ok(f"multi-recipient blob = {len(multi_blob)} bytes")
-    # Each recipient can decrypt
-    for name, ident in [("alice", alice), ("bob", bob), ("carol", carol)]:
-        pt, _ = open_sealed(multi_blob, ident.x25519_priv)
-        if pt != plaintext:
-            fail(f"multi-recipient decrypt FAILED for {name}")
-        ok(f"  {name} decrypts multi-recipient blob")
-    # Stranger cannot
-    stranger = ClassicIdentity.generate()
     try:
-        open_sealed(multi_blob, stranger.x25519_priv)
-        fail("stranger should NOT have been able to decrypt multi-recipient blob")
+        seal_multi(
+            plaintext, m2, issuer.ed25519_priv,
+            [alice.x25519_pub, bob.x25519_pub, carol.x25519_pub],
+        )
+        fail("seal_multi should be disabled until the manifest can bind multiple recipients")
     except Exception as e:
-        ok(f"stranger correctly rejected: {type(e).__name__}")
+        ok(f"multi-recipient seal correctly rejected: {type(e).__name__}")
 
     banner("9. Policy: not_after (expired)")
     expired_m = Manifest.new("exp.txt", content_hash(plaintext), len(plaintext), "acme", issuer.ed25519_pub.hex(), rec, "http://localhost:8765")

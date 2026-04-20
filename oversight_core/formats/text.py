@@ -15,14 +15,18 @@ from .. import watermark, semantic
 
 
 def apply(text: str, mark_id: bytes, layers: tuple[str, ...] = ("L1", "L2", "L3")) -> str:
-    """Apply all requested watermark layers to UTF-8 text."""
+    """Apply all requested watermark layers to UTF-8 text.
+
+    Layer order matters: L3 rewrites visible words, so it must run before the
+    L2/L1 steganographic layers that append whitespace and zero-width chars.
+    """
     t = text
-    if "L1" in layers:
-        t = watermark.embed_zw(t, mark_id)
-    if "L2" in layers:
-        t = watermark.embed_ws(t, mark_id)
     if "L3" in layers:
         t = semantic.apply_semantic(t, mark_id)
+    if "L2" in layers:
+        t = watermark.embed_ws(t, mark_id)
+    if "L1" in layers:
+        t = watermark.embed_zw(t, mark_id)
     return t
 
 

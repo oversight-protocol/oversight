@@ -247,30 +247,16 @@ def seal_multi(
     recipient_x25519_pubs: list[bytes],
 ) -> bytes:
     """
-    Seal a single file for multiple recipients. Each recipient gets a unique
-    wrap of the same DEK. See top-of-module docstring for attribution notes.
-    """
-    if manifest.content_hash != crypto.content_hash(plaintext):
-        raise ValueError("manifest.content_hash does not match sha256(plaintext)")
-    if manifest.size_bytes != len(plaintext):
-        raise ValueError("manifest.size_bytes does not match len(plaintext)")
-    if len(recipient_x25519_pubs) < 1:
-        raise ValueError("need at least one recipient")
-    if len(issuer_ed25519_priv) != 32:
-        raise ValueError(f"issuer priv key must be 32 bytes, got {len(issuer_ed25519_priv)}")
-    for i, pub in enumerate(recipient_x25519_pubs):
-        if len(pub) != 32:
-            raise ValueError(f"recipient[{i}] pubkey must be 32 bytes, got {len(pub)}")
+    Multi-recipient sealing is intentionally disabled.
 
-    manifest.sign(issuer_ed25519_priv)
-    dek = crypto.random_dek()
-    slots = [crypto.wrap_dek_for_recipient(dek, pub) for pub in recipient_x25519_pubs]
-    aad = manifest.content_hash.encode("ascii")
-    nonce, ct = crypto.aead_encrypt(dek, plaintext, aad=aad)
-    sf = SealedFile(
-        manifest=manifest,
-        wrapped_dek={"slots": slots},
-        aead_nonce=nonce,
-        ciphertext=ct,
+    The v1 manifest binds a single recipient identity and public key into the
+    issuer-signed metadata. Reusing that manifest across multiple recipient key
+    slots produces containers that decrypt for several recipients while still
+    claiming only one recipient in signed evidence, which is unsafe for
+    attribution. Callers must currently emit one sealed file per recipient
+    until the wire format grows an explicit multi-recipient manifest.
+    """
+    raise ValueError(
+        "seal_multi is disabled because the v1 manifest only supports a single "
+        "recipient binding; seal one file per recipient instead"
     )
-    return sf.to_bytes()

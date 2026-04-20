@@ -79,6 +79,10 @@ The seal command applies three watermark layers to the document, each targeting 
 
 Then it encrypts to the recipient's X25519 public key, timestamps via RFC 3161, logs to the Merkle tree, and writes the `.sealed` file plus a `.fingerprint.json` sidecar for the content fingerprint database.
 
+Oversight currently emits one sealed file per recipient. Multi-recipient
+sealing is intentionally disabled until the manifest format can bind
+multiple recipients without weakening attribution evidence.
+
 ### What happens when you attribute
 
 The attribute command runs a 5-phase pipeline:
@@ -98,6 +102,15 @@ The attribute command runs a 5-phase pipeline:
 **L3 integration.** The 151-class synonym rotation system and punctuation fingerprinting, previously implemented but not wired into the pipeline, are now fully integrated. Multi-layer Bayesian fusion combines L1, L2, and L3 evidence.
 
 See `CHANGELOG.md` for full version history.
+
+## Security hardening
+
+- `max_opens` now counts only successful recipient decryptions, not failed key guesses.
+- `LOCAL_ONLY` open counters now work on Windows as well as POSIX hosts.
+- `REGISTRY` and `HYBRID` policy modes fail closed instead of silently falling back to local counters.
+- Rekor offline verification now checks the attested digest against the expected content hash.
+- Registry Rekor attestations now index by real watermark mark IDs and the manifest's actual `content_hash`.
+- Multi-recipient sealing is disabled until a recipient-honest manifest format lands.
 
 ## Repository layout
 
@@ -192,7 +205,9 @@ bash oversight-rust/tests/conformance_cross_lang.sh
 
 - **Human paraphrasing defeats watermarks.** Someone who reads the document and rewrites it in their own words leaves no trace. Fundamental, not an engineering gap.
 - **Beacons fire only when the reader has network access.** Airgapped readers leave no callback. L3 semantic watermarking is the attribution path for that case.
-- **Our Merkle transparency log isn't RFC 6962 compliant** (uses promote-odd-trailing, not left-heavy split). Self-consistent but won't verify against Sigstore tooling. Planned migration to Rekor v2 in v0.4.
+- **The local Python Merkle transparency log is still not a full Sigstore-compatible substitute.**
+  Public-log interoperability is now via Rekor DSSE attestations; the local log remains
+  a lightweight registry integrity mechanism, not a drop-in replacement for Rekor.
 - **No independent security audit yet.** Planned for 2027. Until then: user-beware, cryptographer-review welcome. Open an issue.
 - **Rust port is core-only.** ~1,500 LOC ported. The remaining ~5,500 LOC (semantic dictionary, format adapters, registry server, integrations) is multi-release scope. Python is still the canonical reference.
 
