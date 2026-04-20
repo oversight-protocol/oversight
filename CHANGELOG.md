@@ -30,6 +30,21 @@ confuse the hardened tree with the vulnerable `v0.4.3` baseline.
   `tests/test_registry_unit.py`, `tests/test_rekor_unit.py`,
   `tests/test_text_format_unit.py`, and `tests/test_tlog_unit.py`.
 
+Patch sequence on top of `v0.4.3`:
+
+1. `0.4.3` / `0b1a4ab`: Rich CLI, anti-stripping defenses, and L3
+   integration baseline.
+2. `0.4.4` / `dab6157`: policy and Rekor verification hardening.
+3. `0.4.4` / `4d60e3b`: registry Rekor mark indexing fix.
+4. `0.4.4` / `20a566b`: multi-recipient sealing fails closed until the
+   manifest can represent multiple recipients honestly.
+5. `0.4.4` / `482f294`: default beacon/registry domain updated from
+   `oversight.example` to `oversightprotocol.dev`.
+6. `0.4.4` / `7712f98`: signed registry sidecars enforced and RFC 6962
+   empty tlog roots fixed.
+7. `0.4.4` / `0a7a2da`: package, core, and CLI version metadata
+   aligned to the hardened `0.4.4` line.
+
 ## v0.5.0 — 2026-04-19
 
 First release with public-Rekor attestations. Now hosted at
