@@ -8,7 +8,7 @@ Format-agnostic. Post-quantum ready (ML-KEM-768 + ML-DSA-65). Three-layer waterm
 
 No cloud vendor lock-in. No paid service required. No custom cryptography. Apache 2.0.
 
-**Website:** https://oversight-protocol.github.io/oversight/
+**Website:** [https://oversight-protocol.github.io/oversight/](https://oversightprotocol.dev/)
 
 ---
 
