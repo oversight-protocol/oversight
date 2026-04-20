@@ -6,6 +6,7 @@ import json
 from pathlib import Path
 import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
+import os
 
 from oversight_core import (
     ClassicIdentity,
@@ -99,7 +100,7 @@ class OversightGui(tk.Tk):
                 "ed25519_pub": ident.ed25519_pub.hex(),
             }
             path = Path(out_path)
-            path.write_text(json.dumps(out, indent=2))
+            _write_private_json(path, out)
             path.with_suffix(".pub.json").write_text(json.dumps({
                 "id": out["id"],
                 "x25519_pub": out["x25519_pub"],
@@ -193,6 +194,18 @@ class OversightGui(tk.Tk):
 def main() -> None:
     app = OversightGui()
     app.mainloop()
+
+
+def _write_private_json(path: Path, data: dict) -> None:
+    """Write private key material with restrictive permissions where supported."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    payload = json.dumps(data, indent=2)
+    if os.name == "posix":
+        fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            f.write(payload)
+    else:
+        path.write_text(payload, encoding="utf-8")
 
 
 if __name__ == "__main__":
