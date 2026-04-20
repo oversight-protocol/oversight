@@ -269,6 +269,7 @@ def _attest_to_rekor(
     recipient_pubkey_hex: Optional[str],
     suite: str,
     content_hash_sha256_hex: str,
+    watermarks: list[dict],
     mark_id_hex: str,
 ) -> Optional[dict]:
     """Sign a registration predicate with the registry's identity key and
@@ -295,6 +296,11 @@ def _attest_to_rekor(
             recipient_pubkey_sha256=recipient_hash,
             suite=suite,
             registered_at=timestamp_stub(),
+            watermarks={
+                w.get("layer", f"layer_{i}"): w.get("mark_id", "")
+                for i, w in enumerate(watermarks)
+                if w.get("mark_id")
+            },
         )
         statement = rekor_mod.build_statement(
             mark_id_hex=mark_id_hex,
@@ -430,8 +436,12 @@ def register(req: RegistrationRequest, request: Request):
         recipient_id=recipient_id,
         recipient_pubkey_hex=recipient.get("x25519_pub"),
         suite=m.get("suite", "classic"),
-        content_hash_sha256_hex=(m.get("content") or {}).get("sha256", "0" * 64),
-        mark_id_hex=file_id,
+        content_hash_sha256_hex=m.get("content_hash", "0" * 64),
+        watermarks=req.watermarks,
+        mark_id_hex=next(
+            (w["mark_id"] for w in req.watermarks if w.get("mark_id")),
+            file_id,
+        ),
     )
 
     return {
