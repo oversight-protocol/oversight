@@ -43,6 +43,7 @@ pub struct DnsEventRequest {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[allow(dead_code)]
 pub struct QueryParams {
     pub file_id: String,
 }

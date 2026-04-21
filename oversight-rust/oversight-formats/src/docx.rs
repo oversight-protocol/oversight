@@ -27,7 +27,7 @@
 
 use crate::{FormatAdapter, FormatError, WatermarkCandidate};
 
-use quick_xml::events::{BytesEnd, BytesStart, BytesText, Event};
+use quick_xml::events::{BytesText, Event};
 use quick_xml::{Reader, Writer};
 use std::io::Cursor;
 use zip::read::ZipArchive;
@@ -240,8 +240,6 @@ fn inject_keywords_into_core_xml(xml_bytes: &[u8], tag: &str) -> Result<Vec<u8>,
 
     let mut in_keywords = false;
     let mut found_keywords = false;
-    let mut existing_keywords = String::new();
-
     loop {
         match reader.read_event() {
             Ok(Event::Start(ref e)) if e.name().as_ref() == b"cp:keywords" => {
@@ -252,11 +250,10 @@ fn inject_keywords_into_core_xml(xml_bytes: &[u8], tag: &str) -> Result<Vec<u8>,
                     .map_err(|e| FormatError::Internal(format!("XML write error: {}", e)))?;
             }
             Ok(Event::Text(ref t)) if in_keywords => {
-                existing_keywords =
-                    t.unescape().unwrap_or_default().to_string();
+                let existing_keywords = t.unescape().unwrap_or_default().to_string();
                 // Check if oversight tag already exists
                 let new_kw = if existing_keywords.contains(OVERSIGHT_PREFIX) {
-                    existing_keywords.clone()
+                    existing_keywords
                 } else if existing_keywords.is_empty() {
                     tag.to_string()
                 } else {

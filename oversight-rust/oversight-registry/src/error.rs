@@ -5,6 +5,7 @@ use axum::response::{IntoResponse, Response};
 use axum::Json;
 
 #[derive(Debug, thiserror::Error)]
+#[allow(dead_code)]
 pub enum RegistryError {
     #[error("bad request: {0}")]
     BadRequest(String),
