@@ -391,7 +391,9 @@ pub mod upload {
             }
             Err(e) => return Err(RekorError::Network(e.to_string())),
         };
-        let parsed: Value = resp.into_json()?;
+        let parsed: Value = resp
+            .into_json()
+            .map_err(|e| RekorError::Network(e.to_string()))?;
         let log_index = parsed
             .get("logIndex")
             .or_else(|| parsed.get("log_index"))

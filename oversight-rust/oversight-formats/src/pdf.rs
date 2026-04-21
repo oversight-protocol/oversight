@@ -23,7 +23,7 @@
 //! might inject unwanted objects).
 
 use crate::{FormatAdapter, FormatError, WatermarkCandidate};
-use lopdf::{Document, Object, StringFormat};
+use lopdf::{Dictionary, Document, Object, StringFormat};
 
 /// PDF `/Info` dictionary key for the oversight mark_id.
 const METADATA_KEY: &str = "OversightMark";
@@ -114,7 +114,7 @@ pub fn embed_pdf_metadata(
     // Set metadata fields in the document info dictionary
     doc.trailer.remove(b"Info"); // Remove old info reference if any
 
-    let mut info_dict = lopdf::dictionary::Dictionary::new();
+    let mut info_dict = Dictionary::new();
     info_dict.set(
         METADATA_KEY,
         Object::String(mark_hex.into_bytes(), StringFormat::Literal),
@@ -291,7 +291,7 @@ fn sanitize_pdf_string(s: &str) -> String {
 }
 
 /// Helper to get a string value from a PDF dictionary.
-fn get_string_from_dict(dict: &lopdf::dictionary::Dictionary, key: &str) -> Option<String> {
+fn get_string_from_dict(dict: &Dictionary, key: &str) -> Option<String> {
     dict.get(key.as_bytes())
         .ok()
         .and_then(|obj| match obj {

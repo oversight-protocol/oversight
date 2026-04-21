@@ -360,11 +360,11 @@ fn extract_text_elements(xml_bytes: &[u8]) -> Result<String, FormatError> {
     loop {
         match reader.read_event() {
             Ok(Event::Start(ref e)) => {
-                let local_name = e.name().as_ref();
-                if local_name == b"w:p" || local_name.ends_with(b":p") {
+                let local_name = e.name().as_ref().to_vec();
+                if local_name.as_slice() == b"w:p" || local_name.ends_with(b":p") {
                     in_paragraph = true;
                     paragraph_texts.clear();
-                } else if local_name == b"w:t" || local_name.ends_with(b":t") {
+                } else if local_name.as_slice() == b"w:t" || local_name.ends_with(b":t") {
                     in_text = true;
                 }
             }
@@ -376,10 +376,10 @@ fn extract_text_elements(xml_bytes: &[u8]) -> Result<String, FormatError> {
                 paragraph_texts.push(text);
             }
             Ok(Event::End(ref e)) => {
-                let local_name = e.name().as_ref();
-                if local_name == b"w:t" || local_name.ends_with(b":t") {
+                let local_name = e.name().as_ref().to_vec();
+                if local_name.as_slice() == b"w:t" || local_name.ends_with(b":t") {
                     in_text = false;
-                } else if local_name == b"w:p" || local_name.ends_with(b":p") {
+                } else if local_name.as_slice() == b"w:p" || local_name.ends_with(b":p") {
                     if in_paragraph && !paragraph_texts.is_empty() {
                         parts.push(paragraph_texts.join(""));
                     }
