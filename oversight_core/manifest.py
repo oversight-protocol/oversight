@@ -15,7 +15,7 @@ from __future__ import annotations
 import json
 import time
 import uuid
-from dataclasses import dataclass, field, asdict
+from dataclasses import dataclass, field, asdict, fields
 from typing import Optional
 
 from .crypto import sign_manifest, verify_manifest, SUITE_CLASSIC_V1
@@ -156,13 +156,43 @@ class Manifest:
 
     @classmethod
     def from_json(cls, data: bytes) -> "Manifest":
-        d = json.loads(data.decode("utf-8"))
+        try:
+            d = json.loads(data.decode("utf-8"))
+        except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+            raise ValueError("Malformed manifest JSON") from exc
+        if not isinstance(d, dict):
+            raise ValueError("Malformed manifest: expected JSON object")
+
         rec = d.pop("recipient", None)
         wms = d.pop("watermarks", [])
-        m = cls(**d)
-        if rec:
-            m.recipient = Recipient(**rec)
-        m.watermarks = [WatermarkRef(**w) for w in wms]
+        allowed = {f.name for f in fields(cls)}
+        unknown = sorted(set(d) - allowed)
+        if unknown:
+            raise ValueError(f"Unknown manifest field: {unknown[0]}")
+        try:
+            m = cls(**d)
+            if rec:
+                if not isinstance(rec, dict):
+                    raise ValueError("Malformed manifest recipient")
+                rec_allowed = {f.name for f in fields(Recipient)}
+                rec_unknown = sorted(set(rec) - rec_allowed)
+                if rec_unknown:
+                    raise ValueError(f"Unknown recipient field: {rec_unknown[0]}")
+                m.recipient = Recipient(**rec)
+            if not isinstance(wms, list):
+                raise ValueError("Malformed manifest watermarks")
+            wm_allowed = {f.name for f in fields(WatermarkRef)}
+            watermarks = []
+            for w in wms:
+                if not isinstance(w, dict):
+                    raise ValueError("Malformed manifest watermark")
+                wm_unknown = sorted(set(w) - wm_allowed)
+                if wm_unknown:
+                    raise ValueError(f"Unknown watermark field: {wm_unknown[0]}")
+                watermarks.append(WatermarkRef(**w))
+            m.watermarks = watermarks
+        except TypeError as exc:
+            raise ValueError("Malformed manifest fields") from exc
         return m
 
     # ---- signing & verification ----

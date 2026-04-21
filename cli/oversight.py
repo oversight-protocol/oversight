@@ -49,11 +49,21 @@ from oversight_core import (
 from oversight_core.container import SealedFile
 from oversight_core import semantic
 from oversight_core.fingerprint import ContentFingerprint
+from oversight_core.safe_io import (
+    atomic_write_bytes,
+    atomic_write_private_json,
+    atomic_write_text,
+    validate_output_path,
+)
 
 
 # ---------------- keygen ----------------
 
 def cmd_keygen(args):
+    out_path = Path(args.out)
+    pub_path = out_path.with_suffix(".pub.json")
+    validate_output_path(out_path)
+    validate_output_path(pub_path, input_paths=[out_path])
     ident = ClassicIdentity.generate()
     out = {
         "id": args.id or "identity",
@@ -62,10 +72,9 @@ def cmd_keygen(args):
         "ed25519_priv": ident.ed25519_priv.hex(),
         "ed25519_pub": ident.ed25519_pub.hex(),
     }
-    Path(args.out).write_text(json.dumps(out, indent=2))
+    atomic_write_private_json(out_path, out)
     # also write a public-only sibling
-    pub_path = Path(args.out).with_suffix(".pub.json")
-    pub_path.write_text(json.dumps({
+    atomic_write_text(pub_path, json.dumps({
         "id": out["id"],
         "x25519_pub": out["x25519_pub"],
         "ed25519_pub": out["ed25519_pub"],
@@ -77,9 +86,14 @@ def cmd_keygen(args):
 # ---------------- seal ----------------
 
 def cmd_seal(args):
-    plaintext = Path(args.input).read_bytes()
-    issuer = json.loads(Path(args.issuer_key).read_text())
-    rec_pub = json.loads(Path(args.recipient_pub).read_text())
+    input_path = Path(args.input)
+    issuer_path = Path(args.issuer_key)
+    recipient_path = Path(args.recipient_pub)
+    out_path = Path(args.out)
+    validate_output_path(out_path, input_paths=[input_path, issuer_path, recipient_path])
+    plaintext = input_path.read_bytes()
+    issuer = json.loads(issuer_path.read_text())
+    rec_pub = json.loads(recipient_path.read_text())
 
     canonical_plaintext = plaintext
 
@@ -142,14 +156,8 @@ def cmd_seal(args):
     )
 
     # Beacons
-    beacons = beacon.gen_beacons(
-        registry_domain=args.registry_domain,
-        file_id="pending",  # will be replaced after manifest.new assigns file_id
-        recipient_id=rec_pub["id"],
-    )
-
     manifest = Manifest.new(
-        original_filename=Path(args.input).name,
+        original_filename=input_path.name,
         content_hash=content_hash(plaintext),
         size_bytes=len(plaintext),
         issuer_id=args.issuer_id,
@@ -161,6 +169,11 @@ def cmd_seal(args):
     manifest.canonical_content_hash = content_hash(canonical_plaintext)
     if l3_decision:
         manifest.l3_policy = l3_decision.to_dict()
+    beacons = beacon.gen_beacons(
+        registry_domain=args.registry_domain,
+        file_id=manifest.file_id,
+        recipient_id=rec_pub["id"],
+    )
     manifest.watermarks = watermarks_for_manifest
     manifest.beacons = [b.to_dict() for b in beacons]
 
@@ -183,7 +196,7 @@ def cmd_seal(args):
         recipient_x25519_pub=bytes.fromhex(rec_pub["x25519_pub"]),
     )
 
-    Path(args.out).write_bytes(blob)
+    atomic_write_bytes(out_path, blob)
     print(f"[+] wrote {args.out} ({len(blob)} bytes)")
     print(f"[+] file_id={manifest.file_id}")
     print(f"[+] recipient={recipient.recipient_id}")
@@ -191,8 +204,8 @@ def cmd_seal(args):
 
     # Store fingerprint alongside the sealed file
     if fingerprint:
-        fp_path = Path(args.out).with_suffix(".fingerprint.json")
-        fp_path.write_text(json.dumps({
+        fp_path = out_path.with_suffix(".fingerprint.json")
+        atomic_write_text(fp_path, json.dumps({
             "file_id": manifest.file_id,
             "recipient_id": rec_pub["id"],
             "mark_id": watermarks_for_manifest[0].mark_id if watermarks_for_manifest else None,
@@ -226,13 +239,17 @@ def cmd_seal(args):
 # ---------------- open ----------------
 
 def cmd_open(args):
-    blob = Path(args.input).read_bytes()
-    ident = json.loads(Path(args.identity).read_text())
+    input_path = Path(args.input)
+    identity_path = Path(args.identity)
+    out_path = Path(args.out)
+    validate_output_path(out_path, input_paths=[input_path, identity_path])
+    blob = input_path.read_bytes()
+    ident = json.loads(identity_path.read_text())
     plaintext, manifest = open_sealed(
         blob,
         recipient_x25519_priv=bytes.fromhex(ident["x25519_priv"]),
     )
-    Path(args.out).write_bytes(plaintext)
+    atomic_write_bytes(out_path, plaintext)
     print(f"[+] decrypted to {args.out}")
     print(f"[+] file_id   = {manifest.file_id}")
     print(f"[+] issuer    = {manifest.issuer_id}")
@@ -481,13 +498,16 @@ def main():
 
     args = p.parse_args()
 
-    {
-        "keygen": cmd_keygen,
-        "seal": cmd_seal,
-        "open": cmd_open,
-        "inspect": cmd_inspect,
-        "attribute": cmd_attribute,
-    }[args.cmd](args)
+    try:
+        {
+            "keygen": cmd_keygen,
+            "seal": cmd_seal,
+            "open": cmd_open,
+            "inspect": cmd_inspect,
+            "attribute": cmd_attribute,
+        }[args.cmd](args)
+    except (ValueError, FileExistsError, OSError, json.JSONDecodeError) as exc:
+        raise SystemExit(f"[!] {exc}") from exc
 
 
 if __name__ == "__main__":

@@ -50,6 +50,12 @@ from oversight_core import (
 )
 from oversight_core.container import SealedFile
 from oversight_core.fingerprint import ContentFingerprint
+from oversight_core.safe_io import (
+    atomic_write_bytes,
+    atomic_write_private_json,
+    atomic_write_text,
+    validate_output_path,
+)
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -263,6 +269,13 @@ def cmd_keys_generate(args):
             "Use --force to overwrite."
         )
         sys.exit(1)
+    pub_path = out_path.with_suffix(".pub.json")
+    try:
+        validate_output_path(out_path, allow_existing=args.force)
+        validate_output_path(pub_path, input_paths=[out_path], allow_existing=args.force)
+    except (ValueError, FileExistsError) as exc:
+        error_panel(str(exc))
+        sys.exit(1)
 
     with Progress(
         SpinnerColumn(),
@@ -280,15 +293,14 @@ def cmd_keys_generate(args):
         "ed25519_pub": ident.ed25519_pub.hex(),
     }
 
-    pub_path = out_path.with_suffix(".pub.json")
     pub_data = {
         "id": identity_name,
         "x25519_pub": ident.x25519_pub.hex(),
         "ed25519_pub": ident.ed25519_pub.hex(),
     }
 
-    out_path.write_text(json.dumps(priv_data, indent=2))
-    pub_path.write_text(json.dumps(pub_data, indent=2))
+    atomic_write_private_json(out_path, priv_data)
+    atomic_write_text(pub_path, json.dumps(pub_data, indent=2))
 
     # Update config if we have one
     if config_dir and not args.out:
@@ -503,6 +515,11 @@ def cmd_seal(args):
 
     # Determine output path
     out_path = Path(args.out) if args.out else input_path.with_suffix(".sealed")
+    try:
+        validate_output_path(out_path, input_paths=[input_path, issuer_key_path, recipient_pub_path])
+    except (ValueError, FileExistsError) as exc:
+        error_panel(str(exc))
+        sys.exit(1)
 
     # Resolve settings
     registry_url = args.registry_url or cfg.get("registry_url", "http://localhost:8000")
@@ -596,12 +613,6 @@ def cmd_seal(args):
             ed25519_pub=rec_pub.get("ed25519_pub"),
         )
 
-        beacons = beacon.gen_beacons(
-            registry_domain=registry_domain,
-            file_id="pending",
-            recipient_id=rec_pub["id"],
-        )
-
         manifest = Manifest.new(
             original_filename=input_path.name,
             content_hash=content_hash(plaintext),
@@ -615,6 +626,11 @@ def cmd_seal(args):
         manifest.canonical_content_hash = content_hash(canonical_plaintext)
         if l3_decision:
             manifest.l3_policy = l3_decision.to_dict()
+        beacons = beacon.gen_beacons(
+            registry_domain=registry_domain,
+            file_id=manifest.file_id,
+            recipient_id=rec_pub["id"],
+        )
         manifest.watermarks = watermarks_for_manifest
         manifest.beacons = [b.to_dict() for b in beacons]
         progress.advance(task)
@@ -640,11 +656,11 @@ def cmd_seal(args):
 
         # Step 7: Write output
         progress.update(task, description="Writing sealed file...")
-        out_path.write_bytes(blob)
+        atomic_write_bytes(out_path, blob)
 
         if fingerprint:
             fp_path = out_path.with_suffix(".fingerprint.json")
-            fp_path.write_text(json.dumps({
+            atomic_write_text(fp_path, json.dumps({
                 "file_id": manifest.file_id,
                 "recipient_id": rec_pub["id"],
                 "mark_id": mark_id.hex() if mark_id else None,
@@ -734,6 +750,11 @@ def cmd_open(args):
         sys.exit(1)
 
     out_path = Path(args.out) if args.out else input_path.with_suffix("")
+    try:
+        validate_output_path(out_path, input_paths=[input_path, identity_path])
+    except (ValueError, FileExistsError) as exc:
+        error_panel(str(exc))
+        sys.exit(1)
 
     ident = json.loads(identity_path.read_text())
 
@@ -750,7 +771,7 @@ def cmd_open(args):
                 blob,
                 recipient_x25519_priv=bytes.fromhex(ident["x25519_priv"]),
             )
-            out_path.write_bytes(plaintext)
+            atomic_write_bytes(out_path, plaintext)
         except ValueError as e:
             error_panel(
                 f"Decryption failed: {e}",

@@ -16,6 +16,12 @@ Review-driven hardening from `P:/Oversight/oversight-protocol-review.md`.
   L3 application is opt-in; L1/L2 remain available by default.
 - `cli/gui.py`: added a Tkinter desktop GUI for key generation, sealing, and
   opening files (`oversight gui`) so non-technical users have a starter path.
+- GUI and CLI output writes now fail closed against private-key overwrites,
+  same-path writes, reserved Windows device names, malformed key files, and
+  non-UTF-8 watermark attempts. Private-key writes use atomic replacement and
+  restrictive permissions/ACL hardening where supported.
+- `.sealed` parsing now rejects tampered suite IDs, malformed manifest/wrapped-DEK
+  JSON, unknown manifest fields, and trailing bytes after ciphertext.
 - `docs/security.md`: documented L3 collusion/canonicalization limits, layer
   survival properties, passive beacon limits, jurisdiction-by-IP limits, and
   RFC 3161 timestamp semantics.
@@ -26,7 +32,9 @@ Review-driven hardening from `P:/Oversight/oversight-protocol-review.md`.
   before SOC 2 / ISO 27001 work.
 - Raised vulnerable dependency floors flagged by Dependabot/PyPI advisory
   checks: setuptools, cryptography, PyNaCl, pydantic, python-multipart,
-  Pillow, and pypdf now require patched minimums.
+  Pillow, and pypdf now require patched minimums; Rust manifest floors
+  now pin patched minima for sqlx, tokio, rand_core, zip, chrono, regex,
+  once_cell, and tracing-subscriber.
 - Added focused regression coverage in `tests/test_l3_policy_unit.py`.
 
 ## v0.4.4 - 2026-04-20 security hardening

@@ -29,16 +29,16 @@ rand_core = { workspace = true, features = ["getrandom"] }
 
 # Web framework
 axum = { version = "0.7", features = ["macros"] }
-tokio = { version = "1", features = ["full"] }
+tokio = { version = "1.44.2", features = ["full"] }
 tower = { version = "0.4" }
 tower-http = { version = "0.5", features = ["cors", "trace"] }
 
 # Database
-sqlx = { version = "0.7", features = ["runtime-tokio", "sqlite"] }
+sqlx = { version = "0.8.1", features = ["runtime-tokio", "sqlite"] }
 
 # Utilities
 clap = { workspace = true }
 anyhow = "1"
-chrono = { version = "0.4", features = ["serde"] }
+chrono = { version = "0.4.20", features = ["serde"] }
 tracing = "0.1"
-tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+tracing-subscriber = { version = "0.3.20", features = ["env-filter"] }

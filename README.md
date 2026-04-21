@@ -104,10 +104,17 @@ collusion/threat-model documentation in `docs/security.md`.
 
 **GUI starter.** `oversight gui` launches a small desktop app for key
 generation, sealing, and opening files so non-technical recipients are not
-forced through the CLI.
+forced through the CLI. The GUI and CLI now guard local writes so seal/open
+outputs cannot overwrite selected input files or Oversight private-key JSON;
+private-key generation uses atomic replacement and restrictive permissions or
+best-effort Windows ACL hardening.
 
 **Registry federation draft.** `docs/spec/registry-v1.md` documents the
 interoperability contract for compatible registry operators.
+
+**Public reference metadata.** `docs/META/public-reference.yaml` is the
+authoritative repo source for public version numbers, dependency floors,
+canonical links, writing rules, and website update contracts.
 
 ## What's new in v0.4.4
 
@@ -153,6 +160,10 @@ These items are included in v0.4.4/v0.4.5 and current `main`:
   DOCX keyword insertion, and PDF action screening.
 - L3 semantic watermarking is opt-in for sensitive classes, requires
   disclosure acknowledgement when enabled, and records `canonical_content_hash`.
+- `.sealed` parsing rejects suite-byte tamper, malformed manifest or wrapped-DEK
+  JSON, unknown manifest fields, and trailing bytes after ciphertext.
+- Dependency floors now exclude known vulnerable PyPI and Rust manifest ranges
+  flagged by Dependabot/advisory checks.
 
 ## Repository layout
 

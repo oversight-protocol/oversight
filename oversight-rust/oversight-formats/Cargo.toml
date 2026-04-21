@@ -20,7 +20,7 @@ hex.workspace = true
 lopdf = { version = "0.34", optional = true }
 
 # DOCX (OOXML): zip for container, quick-xml for XML parsing
-zip = { version = "2", default-features = false, features = ["deflate"], optional = true }
+zip = { version = "2.3.0", default-features = false, features = ["deflate"], optional = true }
 quick-xml = { version = "0.36", features = ["serialize"], optional = true }
 
 # Image pixel access

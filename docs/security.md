@@ -52,6 +52,23 @@ Until those mitigations land, issuers should treat L3 as attribution evidence
 against ordinary leaks and low-to-medium effort stripping, not as a perfect
 collusion-resistant watermark.
 
+## GUI and Local File Safety
+
+The desktop GUI and CLI treat private identity files as high-value key
+material. Seal and open operations MUST NOT overwrite selected input paths or
+files that parse as Oversight private keys. Existing non-key outputs require an
+explicit GUI confirmation, while CLI writes fail closed so operators must choose
+a new path or remove the old file deliberately. Private-key writes use atomic
+temporary files plus replacement; POSIX writes request `0600`, and Windows GUI
+key generation applies a best-effort ACL narrowing after replacement.
+
+Container parsing is intentionally strict. The unsigned suite byte in the binary
+header must match the signed manifest suite, malformed JSON is normalized to
+clean `ValueError` failures, unknown manifest fields are rejected, and trailing
+bytes after the ciphertext are not accepted. These checks keep audit tools and
+future consumers from trusting attacker-controlled side channels outside the
+signed manifest and AEAD-protected ciphertext.
+
 ## Passive Beacons
 
 Passive beacons are forensic telemetry, not a detection guarantee. Absence of

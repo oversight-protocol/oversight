@@ -6,7 +6,7 @@ import json
 from pathlib import Path
 import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
-import os
+from urllib.parse import urlparse
 
 from oversight_core import (
     ClassicIdentity,
@@ -21,6 +21,14 @@ from oversight_core import (
     watermark,
 )
 from oversight_core.fingerprint import ContentFingerprint
+from oversight_core.safe_io import (
+    atomic_write_bytes,
+    atomic_write_private_json,
+    atomic_write_text,
+    is_private_key_file,
+    is_windows_reserved_path,
+    validate_output_path,
+)
 
 
 class OversightGui(tk.Tk):
@@ -91,17 +99,27 @@ class OversightGui(tk.Tk):
 
     def _keygen(self, identity_id: str, out_path: str) -> None:
         try:
+            identity_id = (identity_id or "identity").strip()
+            if not identity_id:
+                raise ValueError("Please enter an identity name.")
+            if len(identity_id) > 256:
+                raise ValueError("Identity name must be 256 characters or fewer.")
+            if not out_path:
+                raise ValueError("Please choose a private key output path.")
+            path = Path(out_path)
+            pub_path = _public_key_path(path)
+            self._prepare_output(path)
+            self._prepare_output(pub_path, input_paths=[path])
             ident = ClassicIdentity.generate()
             out = {
-                "id": identity_id or "identity",
+                "id": identity_id,
                 "x25519_priv": ident.x25519_priv.hex(),
                 "x25519_pub": ident.x25519_pub.hex(),
                 "ed25519_priv": ident.ed25519_priv.hex(),
                 "ed25519_pub": ident.ed25519_pub.hex(),
             }
-            path = Path(out_path)
             _write_private_json(path, out)
-            path.with_suffix(".pub.json").write_text(json.dumps({
+            atomic_write_text(pub_path, json.dumps({
                 "id": out["id"],
                 "x25519_pub": out["x25519_pub"],
                 "ed25519_pub": out["ed25519_pub"],
@@ -112,27 +130,42 @@ class OversightGui(tk.Tk):
 
     def _seal_file(self) -> None:
         try:
-            input_path = Path(self.seal_input.get())
+            input_path = _require_file(self.seal_input.get(), "input file")
+            issuer_path = _require_file(self.seal_issuer.get(), "issuer private key")
+            recipient_path = _require_file(self.seal_recipient.get(), "recipient public key")
+            raw_out = self.seal_out.get().strip()
+            out_path = Path(raw_out) if raw_out else _default_sealed_path(input_path)
+            self._prepare_output(out_path, input_paths=[input_path, issuer_path, recipient_path])
             plaintext = input_path.read_bytes()
             canonical_plaintext = plaintext
-            issuer = json.loads(Path(self.seal_issuer.get()).read_text())
-            rec_pub = json.loads(Path(self.seal_recipient.get()).read_text())
+            issuer = _read_private_identity(issuer_path, "Issuer file")
+            rec_pub = _read_public_identity(recipient_path, "Recipient file")
             watermarks: list[WatermarkRef] = []
             decision = None
 
             if self.watermark_enabled.get():
-                text = plaintext.decode("utf-8")
+                try:
+                    text = plaintext.decode("utf-8")
+                except UnicodeDecodeError as exc:
+                    raise ValueError(
+                        "File is not UTF-8 text. Uncheck 'Embed L1/L2 watermarks' "
+                        "to seal binary data."
+                    ) from exc
                 mark_id = watermark.new_mark_id()
                 decision = l3_policy.decide_l3(
                     filename=str(input_path),
-                    content_type=self.content_type.get(),
+                    content_type=_validate_content_type(self.content_type.get()),
                     text=text,
                     requested_mode=self.l3_mode.get(),
                 )
                 if decision.enabled:
                     if not messagebox.askyesno(
                         "L3 disclosure",
-                        "L3 semantic watermarking changes visible prose. Continue?",
+                        "L3 semantic watermarking changes visible prose.\n\n"
+                        f"Detected document class: {decision.document_class}\n"
+                        f"Mode: {decision.mode}\n"
+                        f"Reason: {decision.reason}\n\n"
+                        "Continue?",
                     ):
                         return
                     text = l3_policy.apply_l3_safe(text, mark_id, mode=decision.mode)
@@ -145,6 +178,8 @@ class OversightGui(tk.Tk):
                     WatermarkRef("L2_whitespace", mark_id.hex()),
                 ])
 
+            registry_url = _validate_registry_url(self.registry_url.get())
+            content_type = _validate_content_type(self.content_type.get())
             recipient = Recipient(rec_pub["id"], rec_pub["x25519_pub"], rec_pub.get("ed25519_pub"))
             manifest = Manifest.new(
                 input_path.name,
@@ -153,21 +188,21 @@ class OversightGui(tk.Tk):
                 issuer.get("id", "issuer"),
                 issuer["ed25519_pub"],
                 recipient,
-                self.registry_url.get(),
-                self.content_type.get(),
+                registry_url,
+                content_type,
             )
             manifest.canonical_content_hash = content_hash(canonical_plaintext)
             manifest.watermarks = watermarks
             manifest.l3_policy = decision.to_dict() if decision else {}
+            beacon_domain = _registry_domain(registry_url)
             manifest.beacons = [
-                b.to_dict() for b in beacon.gen_beacons("oversightprotocol.dev", "pending", rec_pub["id"])
+                b.to_dict() for b in beacon.gen_beacons(beacon_domain, manifest.file_id, rec_pub["id"])
             ]
-            out_path = Path(self.seal_out.get() or f"{input_path}.sealed")
             blob = seal(plaintext, manifest, bytes.fromhex(issuer["ed25519_priv"]), bytes.fromhex(rec_pub["x25519_pub"]))
-            out_path.write_bytes(blob)
+            atomic_write_bytes(out_path, blob)
             if watermarks:
                 fp = ContentFingerprint.from_text(plaintext.decode("utf-8", errors="replace"))
-                out_path.with_suffix(".fingerprint.json").write_text(json.dumps({
+                atomic_write_text(out_path.with_suffix(".fingerprint.json"), json.dumps({
                     "file_id": manifest.file_id,
                     "recipient_id": rec_pub["id"],
                     "canonical_content_hash": manifest.canonical_content_hash,
@@ -180,15 +215,34 @@ class OversightGui(tk.Tk):
 
     def _open_file(self) -> None:
         try:
-            ident = json.loads(Path(self.open_identity.get()).read_text())
+            input_path = _require_file(self.open_input.get(), "sealed file")
+            identity_path = _require_file(self.open_identity.get(), "recipient private key")
+            out_path_raw = self.open_out.get().strip()
+            if not out_path_raw:
+                raise ValueError("Please choose a plaintext output path.")
+            out_path = Path(out_path_raw)
+            self._prepare_output(out_path, input_paths=[input_path, identity_path])
+            ident = _read_private_identity(identity_path, "Recipient identity file")
             plaintext, _manifest = open_sealed(
-                Path(self.open_input.get()).read_bytes(),
+                input_path.read_bytes(),
                 bytes.fromhex(ident["x25519_priv"]),
             )
-            Path(self.open_out.get()).write_bytes(plaintext)
+            atomic_write_bytes(out_path, plaintext)
             messagebox.showinfo("Oversight", "File opened.")
         except Exception as exc:
             messagebox.showerror("Oversight", str(exc))
+
+    def _prepare_output(self, path: Path, input_paths: list[Path] | None = None) -> None:
+        input_paths = input_paths or []
+        if is_private_key_file(path):
+            raise ValueError("Refusing to overwrite an Oversight private key file.")
+        try:
+            validate_output_path(path, input_paths=input_paths)
+            return
+        except FileExistsError:
+            if not messagebox.askyesno("Overwrite file?", f"{path} already exists. Overwrite it?"):
+                raise ValueError("Write cancelled; output file already exists.")
+            validate_output_path(path, input_paths=input_paths, allow_existing=True)
 
 
 def main() -> None:
@@ -198,14 +252,99 @@ def main() -> None:
 
 def _write_private_json(path: Path, data: dict) -> None:
     """Write private key material with restrictive permissions where supported."""
-    path.parent.mkdir(parents=True, exist_ok=True)
-    payload = json.dumps(data, indent=2)
-    if os.name == "posix":
-        fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
-        with os.fdopen(fd, "w", encoding="utf-8") as f:
-            f.write(payload)
-    else:
-        path.write_text(payload, encoding="utf-8")
+    atomic_write_private_json(path, data)
+
+
+def _require_file(raw_path: str, label: str) -> Path:
+    if not raw_path.strip():
+        raise ValueError(f"Please choose a {label}.")
+    path = Path(raw_path)
+    if is_windows_reserved_path(path):
+        raise ValueError(f"{label.capitalize()} uses a Windows reserved device name: {path.name}")
+    if not path.exists() or not path.is_file():
+        raise ValueError(f"{label.capitalize()} not found: {path}")
+    return path
+
+
+def _read_json(path: Path, label: str) -> dict:
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as exc:
+        raise ValueError(f"{label} is not valid JSON.") from exc
+    except UnicodeDecodeError as exc:
+        raise ValueError(f"{label} is not UTF-8 JSON.") from exc
+    if not isinstance(data, dict):
+        raise ValueError(f"{label} must contain a JSON object.")
+    return data
+
+
+def _read_private_identity(path: Path, label: str) -> dict:
+    data = _read_json(path, label)
+    for key in ("x25519_priv", "x25519_pub", "ed25519_priv", "ed25519_pub"):
+        if key not in data:
+            raise ValueError(f"{label} does not contain `{key}`; did you select a public key by mistake?")
+        _validate_hex_field(data[key], key, 32)
+    if "id" not in data:
+        raise ValueError(f"{label} does not contain `id`.")
+    return data
+
+
+def _read_public_identity(path: Path, label: str) -> dict:
+    data = _read_json(path, label)
+    for key in ("id", "x25519_pub"):
+        if key not in data:
+            raise ValueError(f"{label} does not contain `{key}`.")
+    _validate_hex_field(data["x25519_pub"], "x25519_pub", 32)
+    if "ed25519_pub" in data:
+        _validate_hex_field(data["ed25519_pub"], "ed25519_pub", 32)
+    return data
+
+
+def _validate_hex_field(value: object, key: str, expected_len: int) -> None:
+    if not isinstance(value, str):
+        raise ValueError(f"`{key}` must be hex text.")
+    try:
+        raw = bytes.fromhex(value)
+    except ValueError as exc:
+        raise ValueError(f"`{key}` is not valid hex.") from exc
+    if len(raw) != expected_len:
+        raise ValueError(f"`{key}` must decode to {expected_len} bytes.")
+
+
+def _validate_registry_url(raw_url: str) -> str:
+    url = (raw_url or "").strip()
+    parsed = urlparse(url)
+    if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+        raise ValueError("Registry URL must be an http(s) URL with a host.")
+    return url
+
+
+def _registry_domain(registry_url: str) -> str:
+    return urlparse(registry_url).netloc or "oversightprotocol.dev"
+
+
+def _validate_content_type(raw_content_type: str) -> str:
+    content_type = (raw_content_type or "application/octet-stream").strip()
+    if any(ch in content_type for ch in "\r\n\"'<>"):
+        raise ValueError("Content type contains unsafe characters.")
+    if "/" not in content_type:
+        raise ValueError("Content type must look like a MIME type, such as text/plain.")
+    return content_type
+
+
+def _public_key_path(private_path: Path) -> Path:
+    name = private_path.name
+    if name.lower().endswith(".pub.json"):
+        raise ValueError("Private key output should not end with .pub.json.")
+    if name.lower().endswith(".priv.json"):
+        return private_path.with_name(name[:-10] + ".pub.json")
+    return private_path.with_suffix(".pub.json")
+
+
+def _default_sealed_path(input_path: Path) -> Path:
+    if input_path.name.lower().endswith(".sealed"):
+        return input_path.with_name(input_path.name + ".out.sealed")
+    return Path(f"{input_path}.sealed")
 
 
 if __name__ == "__main__":

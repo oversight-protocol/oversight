@@ -41,6 +41,10 @@ from .manifest import Manifest
 MAGIC = b"OSGT\x01\x00"
 SUITE_CLASSIC_V1_ID = 1
 SUITE_HYBRID_V1_ID = 2
+SUITE_ID_TO_NAME = {
+    SUITE_CLASSIC_V1_ID: crypto.SUITE_CLASSIC_V1,
+    SUITE_HYBRID_V1_ID: crypto.SUITE_HYBRID_V1,
+}
 
 
 # Hard caps to prevent DoS via attacker-controlled length fields.
@@ -105,17 +109,29 @@ class SealedFile:
             raise ValueError(f"manifest too large: {mlen} > {MAX_MANIFEST_BYTES}")
         manifest_json = _read_exact(buf, mlen, "manifest")
         manifest = Manifest.from_json(manifest_json)
+        expected_suite = SUITE_ID_TO_NAME.get(suite_id)
+        if expected_suite is None:
+            raise ValueError(f"Unsupported suite id: {suite_id}")
+        if manifest.suite != expected_suite:
+            raise ValueError("Container suite id does not match signed manifest suite")
 
         (wlen,) = struct.unpack(">I", _read_exact(buf, 4, "wrapped_dek_len"))
         if wlen > MAX_WRAPPED_DEK_BYTES:
             raise ValueError(f"wrapped_dek too large: {wlen} > {MAX_WRAPPED_DEK_BYTES}")
-        wrapped_dek = json.loads(_read_exact(buf, wlen, "wrapped_dek").decode("utf-8"))
+        try:
+            wrapped_dek = json.loads(_read_exact(buf, wlen, "wrapped_dek").decode("utf-8"))
+        except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+            raise ValueError("Malformed wrapped DEK JSON") from exc
+        if not isinstance(wrapped_dek, dict):
+            raise ValueError("Malformed wrapped DEK: expected JSON object")
 
         aead_nonce = _read_exact(buf, 24, "aead_nonce")
         (clen,) = struct.unpack(">I", _read_exact(buf, 4, "ciphertext_len"))
         if clen > MAX_CIPHERTEXT_BYTES:
             raise ValueError(f"ciphertext too large: {clen} > {MAX_CIPHERTEXT_BYTES}")
         ciphertext = _read_exact(buf, clen, "ciphertext")
+        if buf.tell() != len(data):
+            raise ValueError("Trailing bytes after ciphertext")
 
         return cls(
             manifest=manifest,

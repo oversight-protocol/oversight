@@ -32,7 +32,7 @@ ed25519-dalek = { version = "2", features = ["rand_core"] }
 chacha20poly1305 = { version = "0.10", features = ["alloc"] }
 hkdf = "0.12"
 sha2 = "0.10"
-rand_core = "0.6"
+rand_core = "0.6.2"
 
 # Serialization / encoding
 serde = { version = "1", features = ["derive"] }
