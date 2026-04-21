@@ -42,6 +42,9 @@ Thumbs.db
 *.key
 secrets/
 
+# Private operational META (never push to public repo)
+docs/META/
+
 # Logs / scratch
 *.log
 scratch/

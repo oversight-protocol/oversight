@@ -16,6 +16,8 @@ No cloud vendor lock-in. No paid service required. No custom cryptography. Apach
 
 Requires Python 3.10+.
 
+> **Not comfortable at the command line?** Oversight ships a small desktop app. After the `pip install` step below, run `oversight gui` (or `oversight-gui`) and follow the [GUI quick start](#gui-quick-start). All seal, open, and key-generation workflows are available through the GUI without ever opening a terminal again.
+
 ```bash
 # Clone the repo
 git clone https://github.com/oversight-protocol/oversight.git
@@ -28,7 +30,9 @@ pip install .
 oversight status
 ```
 
-That's it. The `oversight` command is now available globally.
+That's it. The `oversight` command is now available globally. The `oversight-gui` desktop app entry point is installed at the same time.
+
+On Debian, Ubuntu, and derivatives, Tkinter is packaged separately. Install it once so the GUI can launch: `sudo apt install python3-tk`. On Windows and macOS, Tkinter ships with the standard CPython installer.
 
 ### Optional extras
 
@@ -68,6 +72,16 @@ oversight open report.txt.sealed --out report-decrypted.txt
 # 7. If the document leaks, attribute it
 oversight attribute --leak leaked.txt --fingerprints .oversight/fingerprints
 ```
+
+### GUI quick start
+
+If you would rather click than type, run `oversight gui` (or the equivalent `oversight-gui` entry point). A single desktop window opens with three tabs that cover the same workflows as the CLI steps above.
+
+1. **Generate Keys.** Pick an identity name and an output path, then press **Generate Keypair**. The GUI writes your private identity JSON (with `0600` permissions on POSIX or a best-effort Windows ACL narrowing) and a sibling `.pub.json` that you hand to any issuer who needs to seal something to you.
+2. **Seal File.** Choose the input plaintext, the issuer's private key, and the recipient's `.pub.json`. Pick an L3 mode (`auto` is safest), leave the L1 and L2 watermark checkbox on, and press **Seal**. The GUI writes a `.sealed` container and a `.fingerprint.json` sidecar next to it. If L3 is about to rewrite body text, the GUI asks for explicit acknowledgement first, matching the CLI's `--l3-ack` gate.
+3. **Open File.** Choose a `.sealed` file, your private identity, and an output path. The GUI verifies the manifest signature, enforces policy, decrypts the content, and writes the plaintext to the chosen location.
+
+The full walk-through, including every field, the L3 disclosure flow, and troubleshooting for common issues, is at [oversightprotocol.dev/docs/gui.html](https://oversightprotocol.dev/docs/gui.html).
 
 ### What happens when you seal
 
@@ -111,10 +125,6 @@ best-effort Windows ACL hardening.
 
 **Registry federation draft.** `docs/spec/registry-v1.md` documents the
 interoperability contract for compatible registry operators.
-
-**Public reference metadata.** `docs/META/public-reference.yaml` is the
-authoritative repo source for public version numbers, dependency floors,
-canonical links, writing rules, and website update contracts.
 
 ## What's new in v0.4.4
 
