@@ -32,6 +32,7 @@ from cryptography.hazmat.primitives.asymmetric.ed25519 import (
 )
 from cryptography.hazmat.primitives import serialization
 from fastapi import FastAPI, Request, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import Response, JSONResponse
 from pydantic import BaseModel
 
@@ -245,6 +246,35 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title="OVERSIGHT Registry", version="0.2.1", lifespan=lifespan)
+
+# CORS: the public browser inspector at https://oversight-protocol.github.io/oversight/
+# and the site at https://oversightprotocol.dev call the read-only endpoints
+# (/health, /.well-known/oversight-registry, /evidence/{file_id}). Seal, register,
+# and dns_event are never called from a browser, so restrict allowed methods to
+# GET and OPTIONS. Credentials are not used. Additional origins can be allowed
+# with OVERSIGHT_CORS_ORIGINS (comma-separated).
+_default_cors_origins = [
+    "https://oversight-protocol.github.io",
+    "https://oversightprotocol.dev",
+    "https://www.oversightprotocol.dev",
+    "http://localhost:8000",
+    "http://127.0.0.1:8000",
+    "http://localhost:8787",
+    "http://127.0.0.1:8787",
+]
+_extra_origins = [
+    o.strip()
+    for o in os.environ.get("OVERSIGHT_CORS_ORIGINS", "").split(",")
+    if o.strip()
+]
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=_default_cors_origins + _extra_origins,
+    allow_credentials=False,
+    allow_methods=["GET", "OPTIONS"],
+    allow_headers=["Accept", "Content-Type"],
+    max_age=3600,
+)
 
 
 class RegistrationRequest(BaseModel):
