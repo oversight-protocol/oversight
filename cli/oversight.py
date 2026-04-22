@@ -453,6 +453,53 @@ def cmd_attribute(args):
 
 # ---------------- main ----------------
 
+def cmd_siem(args):
+    if args.siem_cmd != "export":
+        raise SystemExit(f"[!] unknown siem command: {args.siem_cmd}")
+
+    from oversight_core import siem
+
+    events = siem.iter_registry_events(
+        args.db,
+        since_unix=args.since,
+        limit=args.limit,
+        registry_id=args.registry_id,
+    )
+
+    output = args.output
+    if output == "-":
+        sink: siem.Sink = siem.StdoutSink()
+    elif output.startswith("http://") or output.startswith("https://"):
+        headers = {}
+        for h in args.header:
+            if ":" not in h:
+                raise SystemExit(f"[!] --header must be 'Key: Value', got: {h!r}")
+            k, v = h.split(":", 1)
+            headers[k.strip()] = v.strip()
+        sink = siem.HTTPJSONSink(output, headers=headers)
+    else:
+        sink = siem.FileSink(output, mode="a")
+
+    try:
+        splunk_kwargs = {}
+        if args.format == "splunk":
+            splunk_kwargs = {
+                "source": args.splunk_source,
+                "sourcetype": args.splunk_sourcetype,
+                "index": args.splunk_index,
+            }
+        count = siem.export_events(
+            events=events,
+            fmt=args.format,
+            sink=sink,
+            splunk_kwargs=splunk_kwargs,
+        )
+    finally:
+        sink.close()
+
+    sys.stderr.write(f"[ok] exported {count} event(s) as {args.format}\n")
+
+
 def main():
     p = argparse.ArgumentParser(prog="oversight")
     sub = p.add_subparsers(dest="cmd", required=True)
@@ -496,6 +543,24 @@ def main():
     a.add_argument("--fingerprints", default=None,
                    help="path to fingerprint file or directory for VM-strip detection")
 
+    x = sub.add_parser("siem", help="export registry events for Splunk, Sentinel, or Elastic")
+    xsub = x.add_subparsers(dest="siem_cmd", required=True)
+    xe = xsub.add_parser("export", help="emit events from the registry SQLite db")
+    xe.add_argument("--db", required=True, help="path to registry.sqlite")
+    xe.add_argument("--format", choices=("splunk", "ecs", "sentinel"), required=True)
+    xe.add_argument("--registry-id", required=True,
+                    help="registry identifier (typically its ed25519 public key hex)")
+    xe.add_argument("--since", type=int, default=None,
+                    help="only emit events with timestamp >= unix epoch seconds")
+    xe.add_argument("--limit", type=int, default=None)
+    xe.add_argument("--output", default="-",
+                    help="'-' for stdout, a file path, or http(s):// URL for HTTP POST")
+    xe.add_argument("--header", action="append", default=[],
+                    help="HTTP header in 'Key: Value' form, repeatable")
+    xe.add_argument("--splunk-index", default=None)
+    xe.add_argument("--splunk-source", default="oversight:registry")
+    xe.add_argument("--splunk-sourcetype", default="oversight:beacon")
+
     args = p.parse_args()
 
     try:
@@ -505,6 +570,7 @@ def main():
             "open": cmd_open,
             "inspect": cmd_inspect,
             "attribute": cmd_attribute,
+            "siem": cmd_siem,
         }[args.cmd](args)
     except (ValueError, FileExistsError, OSError, json.JSONDecodeError) as exc:
         raise SystemExit(f"[!] {exc}") from exc

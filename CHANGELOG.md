@@ -1,5 +1,32 @@
 # Oversight CHANGELOG
 
+## v0.4.6 - 2026-04-22 SIEM export: Splunk, Sentinel, and Elastic
+
+Registry beacon events can now be emitted in three SIEM-native formats so
+security teams get Oversight data into the incident pipeline they already
+run. Formatters are pure; transport is a thin sink layer.
+
+- `oversight_core/siem.py`: new module. Normalized `OversightEvent` model
+  built from the registry `events` table, pure formatters for Splunk HEC,
+  Elastic Common Schema 8.x, and Microsoft Sentinel (Log Analytics custom
+  logs), plus `sentinel_authorization()` helper that signs the Data
+  Collector API `Authorization` header per Microsoft's recipe.
+- `cli/oversight.py`: new `oversight siem export` subcommand. Streams
+  events as JSON lines to stdout, a file, or an HTTPS collector. Supports
+  `--since`, `--limit`, repeatable `--header`, and Splunk source/sourcetype/
+  index overrides. Opens the registry database read-only so it is safe
+  to run against a live service.
+- `docs/SIEM.md`: operator integration guide covering each of the three
+  SIEMs, the event field dictionary, the Sentinel HMAC signing window,
+  and the honest beacon-absence caveat. Also surfaced from the website
+  docs index.
+- `tests/test_siem_unit.py`: 11 focused unit tests covering envelope
+  shape per format, empty-field suppression, SQLite row mapping,
+  read-only iteration, Sentinel HMAC stability, and action-name
+  coverage for every beacon kind.
+- `oversight_core/__init__.py` and `pyproject.toml`: version bumped to
+  `0.4.6`. No breaking changes; SIEM is additive.
+
 ## v0.4.5 - 2026-04-20 L3 safety, GUI, and registry federation docs
 
 Review-driven hardening from `P:/Oversight/oversight-protocol-review.md`.
