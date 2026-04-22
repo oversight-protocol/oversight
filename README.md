@@ -109,6 +109,23 @@ The attribute command runs a 5-phase pipeline:
 4. **Multi-layer Bayesian fusion** combining all evidence into ranked candidates
 5. **Content fingerprint comparison** (winnowing + sentence hashing) as a last resort when all watermarks are stripped
 
+## What's new in v0.4.7
+
+**Registry federation hardening.** `docs/spec/registry-v1.md` now
+specifies the canonicalization algorithm, the uniform error envelope
+and code vocabulary, the full endpoint list including the normative
+beacon paths, the `/.well-known/oversight-registry` shape, and the
+`/evidence` bundle fields. The spec matches what the reference
+registry actually serves, so an independent implementation can target
+something real instead of something aspirational.
+
+**Conformance harness.** `tests/test_registry_conformance.py` is a
+32-check test that runs either against the reference registry
+in-process (CI) or against any live URL
+(`OVERSIGHT_REGISTRY_URL=https://registry.example.org python3
+tests/test_registry_conformance.py`). An independent operator who
+passes the harness can claim v1 compatibility.
+
 ## What's new in v0.4.6
 
 **SIEM export.** Registry beacon events can now be emitted in three

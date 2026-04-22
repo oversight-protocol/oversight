@@ -9,7 +9,7 @@ The launch plan is now gated on product usability and threat-model honesty:
 3. **Outlook add-in only** for the first ecosystem integration. Defer Drive, Box, SharePoint, and Teams plugins until there is a maintainer or design partner paying for them.
 4. **SIEM integration before SOC 2**: prioritize Splunk HEC, Microsoft Sentinel, and Elastic Common Schema exports because they are fast and high enterprise ROI. *Formatters, the `oversight siem export` CLI, and the operator guide shipped in v0.4.6; see `docs/SIEM.md`.*
 5. **SOC 2 Type 1 scoping** is realistic after a design partner. ISO 27001 comes after SOC 2. **FedRAMP is dropped from near-term planning**; it is a multi-year commercial program requiring sponsor-agency backing.
-6. **Registry federation**: publish and harden `docs/spec/registry-v1.md` during the Rust Axum/SQLx registry work so a second operator can run a compatible registry.
+6. **Registry federation**: publish and harden `docs/spec/registry-v1.md` during the Rust Axum/SQLx registry work so a second operator can run a compatible registry. *Spec hardened and a conformance harness at `tests/test_registry_conformance.py` landed in v0.4.7; an operator runs it with `OVERSIGHT_REGISTRY_URL=<url> python3 tests/test_registry_conformance.py` to claim v1 compatibility.*
 
 Correct public-launch sequence:
 

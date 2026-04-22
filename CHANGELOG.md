@@ -1,5 +1,30 @@
 # Oversight CHANGELOG
 
+## v0.4.7 - 2026-04-22 Registry federation hardening and conformance harness
+
+Federation stops being aspirational when a second operator can prove
+compatibility. v0.4.7 hardens the registry v1 interop spec against the
+reference implementation and ships a conformance harness that any
+operator can point at their deployment.
+
+- `docs/spec/registry-v1.md`: expanded with the canonicalization algorithm
+  (`json.dumps(sort_keys=True, separators=(",", ":"))` over UTF-8), the
+  uniform error envelope and `code` vocabulary, a full endpoint table
+  including the normative beacon paths (`/p/{token_id}.png`, `/r/{token_id}`,
+  `/v/{token_id}`), the `/.well-known/oversight-registry` shape, the
+  `/evidence/{file_id}` bundle fields, and the `/tlog/head|proof|range`
+  endpoints federated verifiers rely on. Removed a phantom
+  `/query/{file_id}` endpoint that was in the draft but never shipped.
+- `tests/test_registry_conformance.py`: 32-check harness with two modes.
+  In-process against a FastAPI `TestClient` for CI, or against a live URL
+  when `OVERSIGHT_REGISTRY_URL` is set. Covers identity, liveness, a full
+  signed-manifest registration round trip, attribution by token id,
+  evidence bundle shape, transparency-log head, every beacon endpoint,
+  and DNS event authentication.
+- `docs/ROADMAP.md`: the registry federation item references the harness
+  as the acceptance gate for federation.
+- Version bumped to `0.4.7`. No breaking changes.
+
 ## v0.4.6 - 2026-04-22 SIEM export: Splunk, Sentinel, and Elastic
 
 Registry beacon events can now be emitted in three SIEM-native formats so
