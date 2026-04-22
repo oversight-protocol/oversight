@@ -498,8 +498,8 @@ def main():
 if __name__ == "__main__":
     result = main()
     print(result)
-    # Also write to file
-    outpath = r"PERFORMANCE_BENCHMARKS.md"
+    # Also write to file; override destination via OVERSIGHT_BENCH_OUT.
+    outpath = os.environ.get("OVERSIGHT_BENCH_OUT", "PERFORMANCE_BENCHMARKS.md")
     with open(outpath, "w", encoding="utf-8") as f:
         f.write(result)
     print(f"\n[done] Written to {outpath}", file=sys.stderr)

@@ -51,3 +51,16 @@ scratch/
 tmp/
 .tmp-tests/
 SESSION_*.md
+
+# --- Operational / handoff notes that must not land in public history ---
+SESSION_*.md
+SESSION_RESUME.md
+HANDOFF_*.md
+NOTES_*.md
+*_HANDOFF.md
+RUNBOOK.md
+docs/RUNBOOK.md
+docs/META/
+private/
+secrets/
+*.local.md
