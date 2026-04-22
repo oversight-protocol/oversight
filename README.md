@@ -109,6 +109,21 @@ The attribute command runs a 5-phase pipeline:
 4. **Multi-layer Bayesian fusion** combining all evidence into ranked candidates
 5. **Content fingerprint comparison** (winnowing + sentence hashing) as a last resort when all watermarks are stripped
 
+## What's new in v0.4.6
+
+**SIEM export.** Registry beacon events can now be emitted in three
+SIEM-native formats: Splunk HEC envelopes, Elastic Common Schema 8.x
+documents, and Microsoft Sentinel Log Analytics custom-log rows. The new
+`oversight_core.siem` module ships pure formatters, a normalized
+`OversightEvent` model built from the registry `events` table, file and
+stdout and HTTP sinks, and a Sentinel HMAC signing helper.
+
+**`oversight siem export` CLI.** Streams events as JSON lines to stdout,
+a file, or a generic HTTPS collector. Supports `--since`, `--limit`,
+repeatable `--header`, and Splunk source/sourcetype/index overrides.
+Opens the registry database in read-only mode so it is safe to run
+against a live service. Full operator guide at `docs/SIEM.md`.
+
 ## What's new in v0.4.5
 
 **L3 safety and usability.** Semantic watermarking is now format-aware and
