@@ -277,6 +277,23 @@ def check_dns_event_requires_secret(cli: Client) -> None:
     )
 
 
+def check_cors_headers(cli: Client) -> None:
+    """A browser inspector hosted at an Oversight-approved origin must be able
+    to read /health and /.well-known; confirm the CORS middleware is present."""
+    origin = "https://oversight-protocol.github.io"
+    try:
+        r = cli.get("/health", headers={"Origin": origin})
+    except TypeError:
+        # Some clients reject unknown kwargs; fall back.
+        r = cli.get("/health")
+    acao = r.headers.get("access-control-allow-origin") if hasattr(r, "headers") else None
+    check(
+        "cors-allows-github-pages-origin",
+        acao in (origin, "*"),
+        f"Access-Control-Allow-Origin={acao!r}",
+    )
+
+
 def check_beacon_endpoints(cli: Client, beacons: list) -> None:
     token = beacons[0]["token_id"]
     r = cli.get(f"/p/{token}.png")
@@ -311,6 +328,9 @@ def run(cli: Client) -> None:
 
         print("\n[*] Transparency log")
         check_tlog_head(cli)
+
+        print("\n[*] CORS")
+        check_cors_headers(cli)
 
         print("\n[*] Beacons and DNS event")
         check_beacon_endpoints(cli, beacons)
