@@ -15,11 +15,13 @@ realism. Recent research (SPADE 2025, HoneyGPT) shows this is an open area
 with no strong commercial shipment.
 
 Backend options (pick via `backend` arg or OVERSIGHT_DECOY_BACKEND env):
-  - "ollama"   — POST to a local Ollama server (recommended; uses GPU node)
+  - "ollama"   — POST to a local Ollama server (recommended)
   - "openai"   — OpenAI-compatible API (for testing)
   - "static"   — hardcoded templates (works offline; lowest quality)
 
-Point OLLAMA_URL at any Ollama instance; default is loopback.
+Override the Ollama endpoint and model with the ``OLLAMA_URL`` and
+``OVERSIGHT_DECOY_MODEL`` environment variables. Defaults target a
+loopback Ollama install.
 """
 
 from __future__ import annotations
@@ -33,8 +35,8 @@ from typing import Optional
 import httpx
 
 
-DEFAULT_OLLAMA = os.environ.get("OLLAMA_URL", "http://[redacted-rfc1918]")
-DEFAULT_MODEL = os.environ.get("OVERSIGHT_DECOY_MODEL", "dolphin-mistral:7b-v2.8")
+DEFAULT_OLLAMA = os.environ.get("OLLAMA_URL", "http://127.0.0.1:11434")
+DEFAULT_MODEL = os.environ.get("OVERSIGHT_DECOY_MODEL", "llama3.1:8b")
 
 
 # Realistic decoy filenames. These are deliberately interesting to an attacker

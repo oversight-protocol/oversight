@@ -43,7 +43,7 @@ v0.5 lands as a stretch goal if evaluation work comes together first.
 
 ## 2. Non-goals for v0.5
 
-- No self-hosted Rekor on [container]. Recorded as out-of-scope (revisit point 3).
+- No self-hosted Rekor for the reference deployment. Recorded as out-of-scope (revisit point 3).
 - No removal of legacy `oversight_core/tlog.py`. It stays as fallback verifier.
 - No Hardware KeyProvider work — that's v0.6 alongside format adapters.
 - No new entry-type negotiation with Sigstore. We use vanilla DSSE.
