@@ -267,12 +267,15 @@ def check_dns_event_requires_secret(cli: Client) -> None:
         json={"token_id": token, "client_ip": "198.51.100.8", "qtype": "A", "qname": "x.example"},
         headers={"X-Oversight-DNS-Secret": "wrong-secret"},
     )
-    # A registry with a configured secret must either require it (401) or
-    # treat loopback-equivalent callers as trusted (200). Silent success with
-    # a *wrong* secret and a *public* client_ip is a conformance failure.
+    # A conforming registry must fail closed on a non-loopback caller
+    # without valid auth. 401 means "secret configured but wrong", 503
+    # means "no secret configured and caller is non-loopback, refuse",
+    # 200 means "loopback-equivalent caller was trusted". Silent success
+    # with a wrong secret and a public client_ip is the only outcome that
+    # fails the spec.
     check(
         "dns-event-auth-enforced",
-        r.status_code in (200, 401),
+        r.status_code in (200, 401, 503),
         f"status={r.status_code}",
     )
 
