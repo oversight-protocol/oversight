@@ -74,6 +74,9 @@ Review-driven hardening from `P:/Oversight/oversight-protocol-review.md`.
   restrictive permissions/ACL hardening where supported.
 - `.sealed` parsing now rejects tampered suite IDs, malformed manifest/wrapped-DEK
   JSON, unknown manifest fields, and trailing bytes after ciphertext.
+- `oversight-rust/oversight-container`: Rust now mirrors the Python parser's
+  strictness by rejecting suite-byte tamper and trailing bytes after the
+  authenticated ciphertext region.
 - `docs/security.md`: documented L3 collusion/canonicalization limits, layer
   survival properties, passive beacon limits, jurisdiction-by-IP limits, and
   RFC 3161 timestamp semantics.

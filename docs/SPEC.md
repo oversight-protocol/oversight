@@ -122,6 +122,10 @@ offset  length    field              notes
 ...     C         ciphertext         AEAD output, includes 16-byte tag
 ```
 
+Implementations MUST reject any `.sealed` file whose unsigned `suite_id`
+header does not match the signed `manifest.suite` value, and MUST reject
+trailing bytes after the declared ciphertext region.
+
 ### 5.2 Manifest
 
 The manifest is canonical JSON (sorted keys, no whitespace, UTF-8). Required fields:

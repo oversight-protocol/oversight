@@ -63,10 +63,24 @@ pub enum ContainerError {
     Utf8(#[from] std::string::FromUtf8Error),
     #[error("precondition failed: {0}")]
     Precondition(&'static str),
+    #[error("suite_id header {header} does not match signed manifest suite {manifest_suite}")]
+    SuiteMismatch { header: u8, manifest_suite: String },
+    #[error("unsupported manifest suite: {0}")]
+    UnsupportedManifestSuite(String),
+    #[error("trailing bytes after ciphertext: {0}")]
+    TrailingBytes(usize),
     #[error("no decryptable slot found (tried {slots} slots)")]
     NoDecryptableSlot { slots: usize },
     #[error("plaintext hash mismatch — manifest and plaintext disagree")]
     HashMismatch,
+}
+
+fn suite_id_for_manifest(suite: &str) -> Option<u8> {
+    match suite {
+        crypto::SUITE_CLASSIC_V1 => Some(SUITE_CLASSIC_V1_ID),
+        crypto::SUITE_HYBRID_V1 => Some(SUITE_HYBRID_V1_ID),
+        _ => None,
+    }
 }
 
 #[derive(Debug)]
@@ -141,6 +155,14 @@ impl SealedFile {
         }
         let manifest_bytes = read_exact(data, &mut at, mlen, "manifest")?;
         let manifest = Manifest::from_json(manifest_bytes)?;
+        let expected_suite_id = suite_id_for_manifest(&manifest.suite)
+            .ok_or_else(|| ContainerError::UnsupportedManifestSuite(manifest.suite.clone()))?;
+        if suite_id != expected_suite_id {
+            return Err(ContainerError::SuiteMismatch {
+                header: suite_id,
+                manifest_suite: manifest.suite.clone(),
+            });
+        }
 
         let wlen = read_u32_be(data, &mut at, "wrapped_dek_len")? as usize;
         if wlen > MAX_WRAPPED_DEK_BYTES {
@@ -166,6 +188,9 @@ impl SealedFile {
             });
         }
         let ciphertext = read_exact(data, &mut at, clen, "ciphertext")?.to_vec();
+        if at != data.len() {
+            return Err(ContainerError::TrailingBytes(data.len() - at));
+        }
 
         Ok(SealedFile {
             manifest,
@@ -400,6 +425,37 @@ mod tests {
         // Just a magic byte, nothing else
         let blob = MAGIC.to_vec();
         assert!(SealedFile::from_bytes(&blob).is_err());
+    }
+
+    #[test]
+    fn suite_id_tamper_rejected() {
+        let issuer = ClassicIdentity::generate();
+        let alice = ClassicIdentity::generate();
+        let plaintext = b"secret";
+        let mut m = make_manifest(&issuer, &alice, plaintext);
+        let mut blob = seal(plaintext, &mut m, issuer.ed25519_priv.as_ref(), &alice.x25519_pub).unwrap();
+        blob[7] ^= 0x01;
+        match SealedFile::from_bytes(&blob) {
+            Err(ContainerError::SuiteMismatch { header, manifest_suite }) => {
+                assert_eq!(header, 0);
+                assert_eq!(manifest_suite, crypto::SUITE_CLASSIC_V1);
+            }
+            other => panic!("expected SuiteMismatch, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn trailing_bytes_rejected() {
+        let issuer = ClassicIdentity::generate();
+        let alice = ClassicIdentity::generate();
+        let plaintext = b"secret";
+        let mut m = make_manifest(&issuer, &alice, plaintext);
+        let mut blob = seal(plaintext, &mut m, issuer.ed25519_priv.as_ref(), &alice.x25519_pub).unwrap();
+        blob.extend_from_slice(b"junk");
+        match SealedFile::from_bytes(&blob) {
+            Err(ContainerError::TrailingBytes(4)) => (),
+            other => panic!("expected TrailingBytes, got {:?}", other),
+        }
     }
 
     #[test]
