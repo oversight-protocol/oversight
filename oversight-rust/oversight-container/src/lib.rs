@@ -31,7 +31,13 @@ pub const SUITE_HYBRID_V1_ID: u8 = 2;
 // Hard caps to prevent DoS via attacker-controlled length fields.
 pub const MAX_MANIFEST_BYTES: usize = 4 * 1024 * 1024;
 pub const MAX_WRAPPED_DEK_BYTES: usize = 1 * 1024 * 1024;
+// 4 GiB on 64-bit; usize::MAX on 32-bit (which is just under 4 GiB anyway).
+// The literal `4 * 1024 * 1024 * 1024` overflows on 32-bit targets, blocking
+// 32-bit Android / iOS builds at const-eval time.
+#[cfg(target_pointer_width = "64")]
 pub const MAX_CIPHERTEXT_BYTES: usize = 4 * 1024 * 1024 * 1024;
+#[cfg(not(target_pointer_width = "64"))]
+pub const MAX_CIPHERTEXT_BYTES: usize = usize::MAX;
 
 #[derive(Debug, Error)]
 pub enum ContainerError {
