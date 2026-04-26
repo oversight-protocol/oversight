@@ -9,6 +9,7 @@ Format-agnostic. Post-quantum ready (ML-KEM-768 + ML-DSA-65). Layered watermarki
 No cloud vendor lock-in. No paid service required. No custom cryptography. Apache 2.0.
 
 **Website:** [https://oversight-protocol.github.io/oversight/](https://oversightprotocol.dev/)
+**Mobile companion (verifier):** [oversight-protocol/oversight-mobile](https://github.com/oversight-protocol/oversight-mobile) — Flutter UI on top of the same Rust crates that power this CLI, currently in internal TestFlight beta.
 
 ---
 
