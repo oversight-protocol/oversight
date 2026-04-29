@@ -1,5 +1,24 @@
 # Oversight CHANGELOG
 
+## v0.4.8 - 2026-04-29 Mobile-build portability and rustls-webpki security bump
+
+Patch release covering two upstream-driven fixes that landed on `main`
+since v0.4.7. No new features and no breaking changes.
+
+- `oversight-rust/oversight-container`: gate the 4 GiB
+  `MAX_CIPHERTEXT_BYTES` literal to 64-bit targets and fall back to
+  `usize::MAX` on 32-bit. Required to cross-compile the Rust core for
+  Android `armv7-linux-androideabi` and `i686-linux-android`, which the
+  mobile companion (`oversight-protocol/oversight-mobile`, Flutter +
+  Rust via `flutter_rust_bridge`) embeds unchanged. Behavior is preserved
+  for any realistic bundle on 32-bit; `usize::MAX` is just under 4 GiB
+  on those targets. (PR #4, merged 2026-04-26.)
+- `oversight-rust` Cargo.lock: bumped `rustls-webpki` from 0.103.12 to
+  0.103.13. Patches a reachable panic in CRL parsing
+  (GHSA-82j2-j2ch-gfr8) and an inverted-meaning URI excluded-subtree
+  check (rustls/webpki#471). In scope because the Rust registry and
+  Rekor clients use rustls for TLS. (Dependabot PR #3, merged 2026-04-29.)
+
 ## v0.4.7 - 2026-04-22 Registry federation hardening and conformance harness
 
 Federation stops being aspirational when a second operator can prove

@@ -110,6 +110,16 @@ The attribute command runs a 5-phase pipeline:
 4. **Multi-layer Bayesian fusion** combining all evidence into ranked candidates
 5. **Content fingerprint comparison** (winnowing + sentence hashing) as a last resort when all watermarks are stripped
 
+## What's new in v0.4.8
+
+**Mobile-build portability and security bump.** Patch release. The
+Rust core's 4 GiB ciphertext-size cap is now gated to 64-bit targets
+and falls back to `usize::MAX` on 32-bit, which is what unblocks the
+mobile companion's `armv7` and `i686` Android builds (the desktop CLI
+and registry are unchanged). `rustls-webpki` lifted to 0.103.13 to
+pick up the GHSA-82j2-j2ch-gfr8 CRL parse fix and a corrected URI
+name-constraint check; both apply to our Rekor TLS path.
+
 ## What's new in v0.4.7
 
 **Registry federation hardening.** `docs/spec/registry-v1.md` now
