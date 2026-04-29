@@ -282,6 +282,21 @@ cargo run -- open --input doc.sealed --output - --recipient alice.json
 bash oversight-rust/tests/conformance_cross_lang.sh
 ```
 
+## Embedding the verification core
+
+Downstream projects can embed the Oversight Rust verification core without
+reimplementing it. The companion mobile verifier
+([`oversight-protocol/oversight-mobile`](https://github.com/oversight-protocol/oversight-mobile))
+does exactly this through `flutter_rust_bridge`, so a manifest that opens on
+a desktop opens the same way on a phone with the same answer.
+
+The full integration contract, including the seven verifier-safe crates,
+the crates that are explicitly out of scope for downstream embedding, the
+git-plus-tag pin pattern, and the minimum versions for 32-bit mobile
+support, is documented at [`docs/EMBEDDING.md`](docs/EMBEDDING.md). v0.4.8
+is the recommended pin for any new embedder; older tags work but the
+project does not backport fixes below the current stable line.
+
 ## Test coverage
 
 | Layer | Checks | Status |
