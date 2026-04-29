@@ -1,0 +1,563 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Watermark Resilience Analysis | Oversight Protocol</title>
+  <meta name="description" content="Technical analysis of watermark resilience against stripping attacks, ECC protection, content fingerprinting, capacity bounds, and honest limitations.">
+  <meta name="author" content="Zion Boggan">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="../css/style.css">
+</head>
+<body>
+
+<nav class="site-nav">
+  <div class="nav-inner">
+    <a href="../" class="nav-brand"><span>Oversight</span> Protocol</a>
+    <ul class="nav-links">
+      <li><a href="../">Home</a></li>
+      <li><a href="../demo/">Demo</a></li>
+      <li><a href="../viewer/">Inspect</a></li>
+      <li><a href="../docs/" class="active">Docs</a></li>
+      <li><a href="../research/">Research</a></li>
+      <li><a href="../blog/">Blog</a></li>
+      <li><a href="../about.html">About</a></li>
+    </ul>
+  </div>
+</nav>
+
+<main>
+  <div class="container">
+    <div class="page-header">
+      <h1>Watermark Resilience Analysis</h1>
+      <p class="subtitle">What survives, what doesn't, and why honest threat modeling matters</p>
+    </div>
+
+    <p style="color:var(--text-muted);font-size:14px;">
+      Zion Boggan &middot; April 2026 &middot; Oversight Protocol v0.4.4 (measurement snapshot), documentation current as of v0.4.5
+    </p>
+
+    <p>
+      Oversight embeds three independent watermark layers in each recipient's copy of a
+      sealed document. Each layer targets a different class of attack, and each has known
+      failure modes. This page presents a frank analysis of what the watermark stack
+      can and cannot survive, grounded in the academic literature on text watermarking
+      and informed by the anti-stripping research conducted during protocol development.
+    </p>
+
+    <!-- ============ Attack Taxonomy ============ -->
+    <h2 id="attack-taxonomy">Attack Taxonomy</h2>
+    <p>
+      The adversary receives a watermarked document and wants to leak it without
+      attribution. The following table categorizes the principal attack classes by
+      effort required and which watermark layers they defeat.
+    </p>
+
+    <table>
+      <thead>
+        <tr>
+          <th>Attack Class</th>
+          <th>Effort</th>
+          <th>Defeats L1 (ZW)</th>
+          <th>Defeats L2 (WS)</th>
+          <th>Defeats L3 (Semantic)</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>Strip invisible characters</td>
+          <td>Trivial (one regex)</td>
+          <td>Yes</td>
+          <td>No</td>
+          <td>No</td>
+        </tr>
+        <tr>
+          <td>Strip trailing whitespace</td>
+          <td>Trivial (one regex)</td>
+          <td>No</td>
+          <td>Yes</td>
+          <td>No</td>
+        </tr>
+        <tr>
+          <td>Both normalizations</td>
+          <td>Trivial</td>
+          <td>Yes</td>
+          <td>Yes</td>
+          <td>No</td>
+        </tr>
+        <tr>
+          <td>Manual paraphrase</td>
+          <td>High (hours of work)</td>
+          <td>Yes</td>
+          <td>Yes</td>
+          <td>Yes</td>
+        </tr>
+        <tr>
+          <td>LLM paraphrase</td>
+          <td>Low (~$0.88/M tokens)</td>
+          <td>Yes</td>
+          <td>Yes</td>
+          <td>Yes</td>
+        </tr>
+        <tr>
+          <td>Screenshot + OCR</td>
+          <td>Medium</td>
+          <td>Yes</td>
+          <td>Yes</td>
+          <td>No</td>
+        </tr>
+        <tr>
+          <td>Screenshot + retype</td>
+          <td>High</td>
+          <td>Yes</td>
+          <td>Yes</td>
+          <td>Yes</td>
+        </tr>
+        <tr>
+          <td>Format conversion (DOCX to TXT)</td>
+          <td>Trivial</td>
+          <td>Usually yes</td>
+          <td>Partial</td>
+          <td>No</td>
+        </tr>
+      </tbody>
+    </table>
+
+    <p>
+      The fundamental challenge is straightforward: any mark embedded in formatting or
+      invisible characters dies on normalization; any mark embedded in word choice dies
+      on paraphrase. The only signals that survive total rewrite are structural and
+      semantic properties of the content itself, and even those degrade under aggressive
+      modification.
+    </p>
+
+    <!-- ============ Per-Layer Resilience ============ -->
+    <h2 id="per-layer">Per-Layer Resilience</h2>
+
+    <h3>L1: Zero-Width Unicode</h3>
+    <p>
+      L1 inserts frames of zero-width characters (ZWSP U+200B, ZWNJ U+200C, ZWJ U+200D)
+      at regular intervals throughout the text. Each frame encodes the full 64-bit mark_id.
+      Multiple redundant copies are scattered at configurable density (default: one frame
+      per 40 visible characters).
+    </p>
+    <p>
+      L1 survives copy-paste in most applications and some format conversions. It is
+      defeated by a single regex: <code>[\u200b\u200c\u200d\ufeff]</code> applied globally.
+      Any text-normalization library or linter that strips invisible characters destroys
+      L1 completely. Recovery from L1 is binary: either the frames are present (and
+      extraction is trivial) or they are gone. There is no partial recovery.
+    </p>
+    <p>
+      L1 exists not because it is robust, but because it is cheap to embed, cheap to
+      extract, and catches the lazy adversary who copies the text without thinking about
+      watermarks.
+    </p>
+
+    <h3>L2: Trailing Whitespace</h3>
+    <p>
+      L2 encodes mark_id bits as trailing space (bit 0) vs trailing tab (bit 1) on lines
+      that have no existing trailing whitespace. A 64-bit mark_id requires 64 eligible lines.
+      Partial recovery is supported: if only 40 of 64 lines survive, the recovered bits
+      yield a partial candidate with 62.5% confidence that may still contribute to
+      multi-layer fusion.
+    </p>
+    <p>
+      L2 survives more aggressive cleaning than L1 because many text editors and linters
+      do not strip trailing whitespace from content fields (as opposed to code). However,
+      any tool that normalizes line endings with trailing-space removal destroys L2.
+      Format conversion (DOCX to TXT, PDF to TXT) usually strips trailing whitespace.
+    </p>
+
+    <h3>L3: Semantic Marks</h3>
+    <p>
+      L3 is Oversight's primary resilience layer. It encodes attribution signals in the
+      choice of words and punctuation, not in formatting metadata. L3 comprises five
+      sublayers operating independently:
+    </p>
+    <p>
+      <strong>T1 (synonym rotation):</strong> For each word belonging to one of 151 synonym
+      classes (e.g., {begin, start, commence}), the mark_id determines which variant is
+      selected via a deterministic SHA-256-based expansion. The attacker cannot distinguish
+      a watermarked synonym choice from a natural one without access to the original text.
+      T1 survives format conversion, invisible-character stripping, OCR, and faithful
+      retyping. It is defeated by paraphrasing that changes more than 30% of synonym-class
+      words.
+    </p>
+    <p>
+      <strong>T2 (punctuation fingerprint):</strong> Three deterministic choices per
+      document: Oxford comma presence, em dash vs double-hyphen, and curly vs straight
+      quotes. Yields 3 bits per document. Survives almost everything including OCR.
+    </p>
+    <p>
+      <strong>T2b (spelling variants):</strong> 25 British/American spelling pairs
+      (color/colour, organize/organise, etc.) keyed to mark_id bits. Yields up to 25 bits
+      for documents containing these words. Survives format conversion and OCR.
+    </p>
+    <p>
+      <strong>T2c (contractions):</strong> 30 contraction/expansion pairs (don't/do not,
+      it's/it is, etc.) keyed to mark_id bits. Survives everything except deliberate
+      re-contracting or re-expanding.
+    </p>
+    <p>
+      <strong>T2d (number formatting):</strong> Comma separators in large numbers
+      (1,000 vs 1000) and percent symbol vs word form (50% vs 50 percent). Yields 2 bits.
+    </p>
+    <p>
+      The combined L3 capacity is 30 to 80 bits per page of normal prose, depending on
+      vocabulary composition. Verification uses a weighted scoring system (synonyms 50%,
+      spelling 20%, contractions 20%, punctuation 10%) with an overall match threshold of
+      0.65.
+    </p>
+
+    <h3>Cross-Format Survival Summary</h3>
+    <table>
+      <thead>
+        <tr>
+          <th>Layer</th>
+          <th>DOCX to TXT</th>
+          <th>PDF to TXT</th>
+          <th>Copy-Paste</th>
+          <th>Email Forward</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr><td>L1 (zero-width)</td><td>Maybe</td><td>Usually no</td><td>Maybe</td><td>Usually no</td></tr>
+        <tr><td>L2 (whitespace)</td><td>Usually no</td><td>No</td><td>No</td><td>No</td></tr>
+        <tr><td>L3 (synonyms)</td><td>Yes</td><td>Yes</td><td>Yes</td><td>Yes</td></tr>
+        <tr><td>L3 (punctuation)</td><td>Yes</td><td>Yes</td><td>Yes</td><td>Yes (mostly)</td></tr>
+      </tbody>
+    </table>
+
+    <!-- ============ ECC Protection ============ -->
+    <h2 id="ecc-protection">Error-Correcting Code Protection</h2>
+    <p>
+      The <code>ecc</code> module wraps L3 synonym bits in a repetition code with
+      majority-vote decoding. Each payload bit is repeated R times (default R=7), and
+      decoding recovers the original by majority vote over each group.
+    </p>
+    <p>
+      With R=7, up to 3 errors per group are corrected, yielding an effective tolerance
+      of approximately 40% random bit error rate. For a 64-bit mark_id encoded with R=7,
+      the coded signal requires 448 synonym-class instances. With approximately 150
+      synonym-class hits per page of prose, three pages provide full coverage.
+    </p>
+    <p>
+      The ECC layer transforms L3 from a fragile threshold-based system (where the legacy
+      <code>verify_synonyms_match()</code> uses a 70% match cutoff) into one with
+      mathematically bounded error tolerance. If the attacker flips fewer than
+      floor(R/2) bits per group, the payload is recovered with certainty. If they flip
+      more, detection fails gracefully rather than producing false positives.
+    </p>
+    <p>
+      The approach is simpler than real BCH or Reed-Solomon codes (no Galois field
+      arithmetic is required), but it achieves the practical goal. A future version may
+      replace the repetition code with BCH(63,16,11), which would encode 16 data bits
+      into 63 coded bits tolerating up to 11 errors (17.5% error rate) with better
+      bandwidth efficiency than R=7 repetition.
+    </p>
+
+    <!-- ============ Content Fingerprinting ============ -->
+    <h2 id="content-fingerprint">Content Fingerprinting: The Server-Side Fallback</h2>
+    <p>
+      Content fingerprinting is the defense of last resort when all embedded watermarks
+      have been destroyed. The fingerprint database is not a watermark: the fingerprints
+      are computed at seal time and stored server-side (in the registry or alongside the
+      sealed file), never embedded in the document. Because the adversary cannot strip
+      what is not present in the document, this layer survives the VM-export attack
+      (airgapped VM, strip everything, export clean file).
+    </p>
+    <p>
+      Oversight computes two independent fingerprint types.
+    </p>
+    <p>
+      <strong>Winnowing</strong> (Schleimer, Wilkerson, Aiken; SIGMOD 2003) computes
+      rolling hash fingerprints over character k-grams of the normalized text and selects
+      a subset via the winnowing algorithm (minimum hash in each window of size W).
+      Comparison uses Jaccard similarity over the selected hash sets. Winnowing detects
+      near-verbatim partial copies with high precision. It does not survive paraphrasing,
+      because k-gram hashes change when words change.
+    </p>
+    <p>
+      <strong>Semantic sentence hashing</strong> computes SHA-256 hashes (truncated to
+      16 hex characters) over the sorted content words of each sentence. Sorting provides
+      order-independence within each sentence, so minor word reordering does not change
+      the hash. Comparison uses set-overlap (fraction of hashes from the leaked text
+      that appear in the stored fingerprint). This method survives minor edits and format
+      conversion but not heavy paraphrasing.
+    </p>
+    <p>
+      The combined score is <code>0.4 * winnowing + 0.6 * sentence</code>, reflecting the
+      greater robustness of sentence-level hashing. A combined score of 0.6 or higher
+      produces a MATCH verdict; 0.3 or higher produces LIKELY.
+    </p>
+    <p>
+      Because each recipient's copy has slightly different synonym choices (from L3),
+      the fingerprints of different recipients' copies are measurably different. The
+      leaked text's fingerprint is compared against all stored per-recipient fingerprints,
+      and the closest match identifies the source copy.
+    </p>
+
+    <!-- ============ Capacity Bounds ============ -->
+    <h2 id="capacity-bounds">Information-Theoretic Capacity Bounds</h2>
+    <p>
+      The fundamental limit for post-hoc text watermarking can be analyzed through the
+      lens of the binary symmetric channel. Each synonym-class instance acts as a discrete
+      channel with capacity <code>log2(K)</code> bits where K is the number of variants
+      (typically 3, giving 1.58 bits per instance). An adversary who paraphrases
+      independently flips each bit with probability p.
+    </p>
+    <p>
+      For a binary symmetric channel with crossover probability p, the capacity is
+      <code>1 - H(p)</code> bits per channel use, where H is the binary entropy function.
+      The practical implications, assuming 150 synonym-class instances per page of prose:
+    </p>
+
+    <table>
+      <thead>
+        <tr>
+          <th>Error Rate (p)</th>
+          <th>Scenario</th>
+          <th>Bits/Instance</th>
+          <th>Usable Bits/Page</th>
+          <th>Pages for 64-bit mark_id</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>0.10</td>
+          <td>Light paraphrasing</td>
+          <td>0.53</td>
+          <td>~80</td>
+          <td>~1</td>
+        </tr>
+        <tr>
+          <td>0.20</td>
+          <td>Moderate paraphrasing</td>
+          <td>0.28</td>
+          <td>~42</td>
+          <td>~2</td>
+        </tr>
+        <tr>
+          <td>0.30</td>
+          <td>LLM paraphrase (moderate)</td>
+          <td>0.12</td>
+          <td>~18</td>
+          <td>~4</td>
+        </tr>
+        <tr>
+          <td>0.50</td>
+          <td>Aggressive LLM rewrite</td>
+          <td>0.00</td>
+          <td>0</td>
+          <td>Impossible</td>
+        </tr>
+      </tbody>
+    </table>
+
+    <p>
+      At p=0.5, the channel capacity drops to zero. No error-correcting code, no matter
+      how sophisticated, can recover the payload. At this point the watermark is information-theoretically destroyed, and the fingerprint database is the only remaining
+      attribution mechanism.
+    </p>
+
+    <!-- ============ No Free Lunch ============ -->
+    <h2 id="no-free-lunch">The No Free Lunch Theorem</h2>
+    <p>
+      Pang, Hu, et al. (NeurIPS 2024) proved a fundamental trade-off in watermarking
+      design, identifying three properties that cannot all be maximized simultaneously:
+    </p>
+    <p>
+      <strong>Robustness:</strong> the watermark survives text modifications.
+      <strong>Anti-spoofing:</strong> adversaries cannot forge the watermark onto arbitrary
+      text to frame an innocent party.
+      <strong>Easy detection:</strong> detection does not require storing all generated
+      text server-side.
+    </p>
+    <p>
+      Robust watermarks are inherently vulnerable to spoofing attacks. Publicly detectable
+      watermarks (using cryptographic signatures) resist spoofing but sacrifice robustness.
+      No design can achieve all three properties at their theoretical maximum.
+    </p>
+    <p>
+      Oversight's threat model prioritizes robustness (leak attribution) over anti-spoofing,
+      and mitigates the spoofing risk through the existing manifest signature and
+      Rekor transparency log. The signed manifest binds each mark_id to a specific
+      recipient, issuer, and timestamp. An attacker who forges a watermark into a document
+      cannot produce a valid manifest signature from the original issuer, so the forged
+      mark would not resolve in the registry. This is an imperfect defense (it requires the
+      registry to be consulted), but it shifts the No Free Lunch balance toward robustness
+      without leaving spoofing completely unaddressed.
+    </p>
+
+    <!-- ============ Best Achievable Resilience ============ -->
+    <h2 id="best-achievable">Best Achievable Resilience</h2>
+    <p>
+      Based on the academic literature survey (19 papers, 2001 to 2026) and empirical
+      testing, the following table represents realistic expected detection rates for
+      post-hoc text watermarking as of 2026.
+    </p>
+
+    <table>
+      <thead>
+        <tr>
+          <th>Attack</th>
+          <th>Best Defense</th>
+          <th>Expected Detection Rate</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>Normalization (strip invisibles)</td>
+          <td>Semantic marks (L3)</td>
+          <td>100%</td>
+        </tr>
+        <tr>
+          <td>Format conversion</td>
+          <td>Semantic marks (L3)</td>
+          <td>100%</td>
+        </tr>
+        <tr>
+          <td>Manual paraphrase (light)</td>
+          <td>Synonym rotation + ECC</td>
+          <td>80-90%</td>
+        </tr>
+        <tr>
+          <td>Manual paraphrase (heavy)</td>
+          <td>Fingerprint database</td>
+          <td>60-70%</td>
+        </tr>
+        <tr>
+          <td>LLM paraphrase (SIRA-class)</td>
+          <td>ECC + redundancy + fingerprint DB</td>
+          <td>40-60%</td>
+        </tr>
+        <tr>
+          <td>Screenshot + faithful retype</td>
+          <td>Synonym marks</td>
+          <td>90%+</td>
+        </tr>
+        <tr>
+          <td>Screenshot + paraphrase retype</td>
+          <td>Fingerprint DB only</td>
+          <td>30-50%</td>
+        </tr>
+        <tr>
+          <td>Full hostile rewrite</td>
+          <td>Nothing at watermark level</td>
+          <td>Use canary traps / unique facts</td>
+        </tr>
+      </tbody>
+    </table>
+
+    <!-- ============ LLM Stripping ============ -->
+    <h2 id="llm-stripping">The LLM-Stripping Threat</h2>
+    <p>
+      LLM-based paraphrasing is the most dangerous attack vector because it is cheap
+      (approximately $0.88 per million tokens) and effective. The SIRA attack
+      (Self-Information Rewrite Attack; Cheng et al., ICML 2025) achieves nearly 100%
+      success against seven recent watermarking methods by targeting high-entropy tokens,
+      which are precisely where watermark information concentrates. Watermarks must place
+      signal in high-entropy positions because low-entropy tokens are too predictable to
+      carry information. SIRA exploits this structural weakness.
+    </p>
+    <p>
+      Oversight's defense-in-depth strategy against LLM stripping relies on three
+      observations. First, L3's synonym rotation distributes signal across many low-salience
+      word choices, making the per-token information density low enough that SIRA-style
+      targeted attacks must modify a large fraction of the text to succeed. Second, the ECC
+      layer tolerates moderate bit errors from partial paraphrasing. Third, the fingerprint
+      database provides attribution even when the watermark is fully destroyed, as long as
+      the leaked text retains enough structural similarity to the original.
+    </p>
+    <p>
+      Against aggressive LLM rewriting where the attacker rewrites every sentence, no
+      embedded watermark survives (the Shannon capacity at p=0.5 is zero). The fingerprint
+      database's effectiveness also degrades because semantic sentence hashes change under
+      full rewriting. At this extreme, the remaining defense is canary content (unique
+      facts per recipient), which requires author cooperation and is not automatable.
+    </p>
+
+    <!-- ============ Honest Limitations ============ -->
+    <h2 id="limitations">Honest Limitations</h2>
+    <p>
+      The following limitations are inherent to text watermarking as a field, not specific
+      deficiencies in Oversight's implementation. Any system claiming to solve these
+      problems should be viewed with skepticism.
+    </p>
+
+    <p>
+      <strong>No text watermark survives a determined adversary with LLM access.</strong>
+      If the attacker is willing to fully rewrite the content in their own words (or pay
+      an LLM to do so), all embedded marks are destroyed. The best achievable goal is
+      making stripping expensive, detectable, and probabilistically attributable, not
+      making it impossible.
+    </p>
+
+    <p>
+      <strong>Semantic watermarks cannot defend against paraphrasing beyond ~50% word
+      substitution.</strong> The information-theoretic channel capacity drops to zero at
+      the 50% crossover probability. This is a mathematical limit, not an engineering one.
+    </p>
+
+    <p>
+      <strong>Content fingerprinting degrades with rewriting distance.</strong> The
+      fingerprint database is a powerful fallback for near-verbatim and lightly-modified
+      leaks. For heavily rewritten text, cosine similarity between sentence embeddings
+      drops below the attribution threshold. Modern sentence transformers (2024-2025)
+      achieve greater than 0.85 cosine similarity for paraphrases, but this drops below
+      0.7 for semantically different content.
+    </p>
+
+    <p>
+      <strong>False positive risk is nonzero.</strong> With 151 three-variant synonym
+      classes and a 70% match threshold across 40 instances, the random match probability
+      is approximately 10<sup>-6</sup>. With ECC, the false positive rate drops below
+      10<sup>-9</sup> for 40+ valid bits. These are acceptable rates for forensic use,
+      but they are not zero. Watermark evidence should be corroborated with other signals
+      (beacon callbacks, access logs, registry records) before taking action against a
+      specific recipient.
+    </p>
+
+    <p>
+      <strong>Airgapped readers leave no network beacon.</strong> DNS and HTTP beacons
+      fire only when the document is opened in a network-connected environment. An
+      adversary who reads the document in an airgapped VM and leaks a summary (not the
+      document itself) produces no watermark evidence and no beacon event. The only
+      defense at that point is operational security: controlling who receives the
+      document in the first place.
+    </p>
+
+    <p>
+      <strong>Oversight's defense-in-depth is the right architecture.</strong> Multiple
+      independent layers, each targeting different attack classes, provide strictly better
+      coverage than any single layer. The current stack (L1 + L2 + L3 + fingerprint DB +
+      beacons + registry) is not individually unbreakable, but the combined attack surface
+      is large enough that an adversary must invest significant effort to defeat all layers
+      simultaneously.
+    </p>
+
+    <hr>
+    <p style="color:var(--text-muted);font-size:14px;">
+      This analysis reflects the state of text watermarking research as of April 2026.
+      The anti-stripping research document with 19 cited papers is available in the
+      <a href="https://github.com/oversight-protocol/oversight">repository</a>
+      (<code>ANTI_STRIPPING_RESEARCH.md</code>).
+    </p>
+
+  </div>
+</main>
+
+<footer class="site-footer">
+  <div class="container">
+    <p>Oversight Protocol &copy; 2026 Zion Boggan. Apache 2.0 License.</p>
+    <p style="color:var(--text-muted);font-size:13px;">Co-authored with Claude Opus 4.6 and 4.7 (Anthropic).</p>
+    <p><a href="https://github.com/oversight-protocol/oversight">GitHub</a></p>
+  </div>
+</footer>
+
+<script src="../js/nav.js" defer></script>
+</body>
+</html>

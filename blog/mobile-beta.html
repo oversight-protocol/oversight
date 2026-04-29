@@ -1,0 +1,250 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Mobile beta is live — and the Apple-side gotcha that nearly hid it | Oversight Protocol</title>
+  <meta name="description" content="The Oversight mobile verifier is on TestFlight. Why a provenance protocol needs a phone-shaped surface, how the Flutter + Rust core stays bit-identical with the desktop CLI, and the export-compliance Info.plist key that quietly hides every build from internal testers if you skip it.">
+  <meta name="author" content="Zion Boggan">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="../css/style.css">
+</head>
+<body>
+
+<nav class="site-nav">
+  <div class="nav-inner">
+    <a href="../" class="nav-brand"><span>Oversight</span> Protocol</a>
+    <ul class="nav-links">
+      <li><a href="../">Home</a></li>
+      <li><a href="../demo/">Demo</a></li>
+      <li><a href="../viewer/">Inspect</a></li>
+      <li><a href="../docs/">Docs</a></li>
+      <li><a href="../research/">Research</a></li>
+      <li><a href="../blog/" class="active">Blog</a></li>
+      <li><a href="../about.html">About</a></li>
+    </ul>
+  </div>
+</nav>
+
+<main>
+  <div class="container">
+
+    <div class="blog-post-header">
+      <h1>Mobile beta is live — and the Apple-side gotcha that nearly hid it</h1>
+      <div class="blog-post-meta">2026-04-26 &middot; Zion Boggan &middot; ~7 min read</div>
+    </div>
+
+    <div class="blog-content">
+
+      <p>
+        The Oversight mobile verifier is on TestFlight as of today. The repo is at
+        <a href="https://github.com/oversight-protocol/oversight-mobile">oversight-protocol/oversight-mobile</a>,
+        the build that just landed for the internal beta is <code>v0.1.11</code>, and
+        the same Rust crates that power the desktop CLI are linked into the iOS and
+        Android binaries. There is exactly one verification implementation; a manifest
+        that opens on a laptop opens the same way on a phone, with the same answer.
+      </p>
+
+      <p>
+        The path to that build was not clean. I want to write down what shipped, why
+        the architecture looks the way it does, and the single Apple-side detail that
+        cost me six TestFlight builds I could see in App Store Connect but my testers
+        could not. If you have ever uploaded to TestFlight, succeeded, and then watched
+        the build never appear on a tester's phone, this post is the answer.
+      </p>
+
+      <h2>Why a phone-shaped surface</h2>
+
+      <p>
+        A provenance protocol whose only verifier is a Python CLI is a protocol nobody
+        verifies. The recipient of a sealed document is rarely the same person who
+        installed the issuer's tooling. They are a journalist who got handed a leaked
+        memo, an analyst checking whether the dataset they pulled is the dataset they
+        were told they pulled, an auditor confirming that a contract bundle has not
+        been tampered with since signing. They have a phone. They do not have
+        <code>pip</code>.
+      </p>
+
+      <p>
+        The mobile app does one thing: take an Oversight artifact (a hash, a QR code,
+        or a <code>.oversight</code> bundle), check it against the public Sigstore
+        Rekor log, and tell you whether the signature is valid, whether the inclusion
+        proof checks out, and what the manifest says about who issued it and to whom.
+        No accounts. No telemetry. No server in the middle. The cryptography happens
+        on the device, against a public append-only log that anybody can audit.
+      </p>
+
+      <h2>One core, two surfaces</h2>
+
+      <p>
+        The verifier is Flutter on top of Rust. The UI layer is Dart, single codebase,
+        both platforms. The verification core is the existing <code>oversight-rust</code>
+        workspace, embedded via <a href="https://github.com/fzyzcjy/flutter_rust_bridge"><code>flutter_rust_bridge</code></a>
+        and called from Dart through a generated FFI shim. There is no second
+        implementation of Rekor proof verification, no second implementation of
+        manifest signature checks, no second copy of the synonym dictionary. Whatever
+        passes the desktop conformance suite passes the mobile build, because they
+        compile from the same source tree.
+      </p>
+
+      <p>
+        That choice has a cost. Cross-compiling Rust for iOS arm64, Android arm64,
+        and Android x86_64 is a real pipeline. The repo carries cargo configurations
+        for each target, a CI job that primes the toolchains on the runner, and a
+        small wrapper crate that hides the platform-specific async runtime selection.
+        The payoff is that I do not have to maintain two cryptography stacks. The
+        most likely way a mobile verifier would lie to its user is by drifting out of
+        sync with the canonical implementation; that class of bug is structurally
+        impossible here.
+      </p>
+
+      <h2>iOS without a Mac</h2>
+
+      <p>
+        I do not own a Mac. The entire iOS pipeline runs on GitHub-hosted macOS
+        runners. <code>flutter build ios --release --no-codesign</code> assembles
+        the <code>.app</code>, <code>xcodebuild archive</code> signs it with a
+        Distribution certificate imported from a base64-encoded <code>.p12</code> in
+        Actions secrets, and <code>xcrun altool --upload-app</code> ships the IPA to
+        App Store Connect with a key from the App Store Connect API. Nothing on my
+        machine ever touches an Xcode project file.
+      </p>
+
+      <p>
+        The interesting constraint is that the runner is headless. There is no
+        keychain, no Xcode project history, no developer account session. Every
+        secret has to arrive through the workflow's encrypted environment, and every
+        signing operation has to declare every input explicitly. The
+        <code>apple-actions/import-codesign-certs</code> and
+        <code>apple-actions/download-provisioning-profiles</code> actions handle the
+        keychain and profile setup; everything else is a shell script in the workflow
+        file. It is reproducible, it is auditable, and it does not require me to own
+        $2,500 of Apple hardware to ship.
+      </p>
+
+      <h2>The Info.plist key that hides every build</h2>
+
+      <p>
+        Here is the part that cost me a day. After v0.1.4 made it onto TestFlight and
+        a tester actually installed it, I shipped six more builds (<code>v0.1.5</code>
+        through <code>v0.1.10</code>) over the next several hours. Each one passed CI.
+        Each one returned <code>UPLOAD SUCCEEDED with no errors</code> from
+        <code>altool</code>. Each one received an "uploaded build had one or more
+        issues" email from App Store Connect that, on close reading, said delivery
+        was successful and the warning was advisory. None of them showed up on the
+        tester's phone.
+      </p>
+
+      <p>
+        The cause is a key called <code>ITSAppUsesNonExemptEncryption</code>. If your
+        <code>Info.plist</code> does not declare it, App Store Connect parks every
+        new build in a state called "Missing Compliance," which is invisible to
+        internal-testing groups by default. The build is uploaded. The build is
+        processed. The build sits there forever, gated behind a manual question that
+        asks whether your app uses non-exempt encryption.
+      </p>
+
+      <p>
+        Oversight's mobile verifier uses standard system cryptography (HTTPS, the
+        platform's TLS stack, and the curated primitives in
+        <a href="https://github.com/RustCrypto">RustCrypto</a>) and nothing in the
+        regulated-export category. The honest answer is "no." Set the key once in
+        the manifest:
+      </p>
+
+      <pre><code>&lt;key&gt;ITSAppUsesNonExemptEncryption&lt;/key&gt;
+&lt;false/&gt;</code></pre>
+
+      <p>
+        and every future build sails through compliance the moment it finishes
+        processing, with no manual click and no human in the loop. v0.1.11 was the
+        first build to ship with the key in place. App Store Connect processed it in
+        about two minutes. It auto-attached itself to the internal testing group. It
+        was on the tester's TestFlight app a few minutes after that, with a green
+        check and no warning badge.
+      </p>
+
+      <p>
+        I am writing this down because the Apple documentation for the key is
+        accurate but easy to miss, and the failure mode is silent. There is no error.
+        There is no rejection email. The build simply does not appear, which makes
+        the obvious next move ("upload another build") cost you another submission
+        slot for nothing.
+      </p>
+
+      <h2>The April 28 SDK cutoff</h2>
+
+      <p>
+        The other thing the same v0.1.11 release fixed is the iOS 26 SDK migration.
+        Apple announced months ago that starting <code>2026-04-28</code>, every new
+        upload has to be built with Xcode 26 or later, against the iOS 26 SDK. That
+        is two days from now. Builds against the iOS 18 SDK get a warning email
+        today and a hard rejection from Wednesday on. The fix on the GitHub Actions
+        side is one line: bump the runner image label from <code>macos-15</code> to
+        <code>macos-26</code>, which has Xcode 26 preinstalled. The runtime image
+        was already in the GitHub-hosted runner pool; I had not realized I was still
+        pinned to the previous one until the ITMS-90725 warnings made it explicit.
+      </p>
+
+      <h2>What is in the build, and what is not</h2>
+
+      <p>
+        v0.1.11 is a pure verifier. It scans QR codes, accepts pasted hashes, and
+        opens <code>.oversight</code> bundles via the iOS share sheet. It pulls live
+        from Sigstore Rekor and checks inclusion proofs against the verified log
+        root. It shows the manifest fields: issuer, recipient, content hash, L3
+        mode, and the timestamp from RFC 3161. It does not store any of that
+        anywhere; the local history is encrypted at rest with a per-install key in
+        the platform keystore.
+      </p>
+
+      <p>
+        It does not sign. Hardware-backed signing &mdash; Secure Enclave on iOS,
+        StrongBox on Android &mdash; is the v2 work, and it is gated on a real
+        threat model for what kind of issuer a phone-bound key should be allowed to
+        be. A device that can be confiscated at a border crossing is not the same
+        trust anchor as an air-gapped laptop in a SCIF, and the protocol's policy
+        primitives need to reflect that before a mobile signer ships.
+      </p>
+
+      <h2>What recruiters and operators care about</h2>
+
+      <p>
+        There is a slightly different audience for this post than for the L3 safety
+        or SIEM export posts: people who evaluate the project as a whole rather than
+        any one feature. For them, the short version is that Oversight is a
+        cryptographic protocol with an end-to-end reference implementation, a
+        conformance test suite, a federation spec, three SIEM-native exporters, a
+        desktop GUI, and a mobile verifier. The mobile build is not a marketing
+        skin. It is the same Rust verification core, on a different surface, with
+        the platform-store distribution cleared end-to-end on a CI pipeline that
+        does not require me to own a Mac. Everything is Apache 2.0, everything is
+        in public repos, every release is a tag with a matching CI run.
+      </p>
+
+      <p>
+        Reproducible mobile builds are next. When that lands, you will be able to
+        clone the repo, run one command, and confirm that the binary distributed by
+        the App Store and Play Store is byte-identical to what you built locally.
+        That is the point at which "trust the protocol" stops requiring "trust the
+        store." Until then, the source is public and every artifact is traceable to
+        a commit.
+      </p>
+
+    </div>
+  </div>
+</main>
+
+<footer class="site-footer">
+  <div class="container">
+    <p>Oversight Protocol &copy; 2026 Zion Boggan. Apache 2.0 License.</p>
+    <p style="color:var(--text-muted);font-size:13px;">Co-authored with Claude Opus 4.6 and 4.7 (Anthropic).</p>
+    <p><a href="https://github.com/oversight-protocol/oversight">GitHub</a> &middot; <a href="https://github.com/oversight-protocol/oversight-mobile">Mobile repo</a></p>
+  </div>
+</footer>
+
+<script src="../js/nav.js" defer></script>
+</body>
+</html>

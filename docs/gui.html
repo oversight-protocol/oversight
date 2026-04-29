@@ -1,0 +1,267 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>GUI Guide | Oversight Protocol</title>
+  <meta name="description" content="Installation, launch, workflows, and implementation notes for the Oversight Tkinter GUI starter shipped in v0.4.5.">
+  <meta name="author" content="Zion Boggan">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="../css/style.css">
+</head>
+<body>
+
+<nav class="site-nav">
+  <div class="nav-inner">
+    <a href="../" class="nav-brand"><span>Oversight</span> Protocol</a>
+    <ul class="nav-links">
+      <li><a href="../">Home</a></li>
+      <li><a href="../demo/">Demo</a></li>
+      <li><a href="../viewer/">Inspect</a></li>
+      <li><a href="../docs/" class="active">Docs</a></li>
+      <li><a href="../research/">Research</a></li>
+      <li><a href="../blog/">Blog</a></li>
+      <li><a href="../about.html">About</a></li>
+    </ul>
+  </div>
+</nav>
+
+<main>
+  <div class="container">
+    <div class="page-header">
+      <h1>GUI Guide</h1>
+      <p class="subtitle">Desktop starter app: installation, workflows, and implementation notes</p>
+    </div>
+
+    <p style="color:var(--text-muted);font-size:14px;">
+      Zion Boggan &middot; April 2026 &middot; Oversight Protocol v0.4.5
+    </p>
+
+    <p>
+      v0.4.5 introduced a Tkinter desktop starter for users who are not comfortable at the
+      command line. The GUI wraps the three first-contact workflows every issuer and recipient
+      needs: generate an identity, seal a file to a recipient, and open a sealed file. The code
+      is a thin adapter over the <code>oversight_core</code> library; everything it can do is
+      also available from the <a href="cli-reference.html">CLI</a>. The GUI is a stepping stone
+      toward the web viewer tracked on the <a href="roadmap.html">roadmap</a>, not the final
+      launch surface.
+    </p>
+
+    <h2 id="install">Installation</h2>
+    <p>
+      Tkinter ships with CPython on Windows and macOS. On Debian, Ubuntu, and derivatives it is
+      packaged separately as <code>python3-tk</code>. Verify that import succeeds before running
+      the GUI:
+    </p>
+<pre><code>python -c "import tkinter; print(tkinter.TkVersion)"</code></pre>
+    <p>
+      Install Oversight from the repository in editable mode, which registers the
+      <code>oversight</code> CLI and the <code>oversight-gui</code> entry point:
+    </p>
+<pre><code>git clone https://github.com/oversight-protocol/oversight
+cd oversight
+pip install -e . --user</code></pre>
+    <p>
+      No additional GUI dependency is required beyond Tkinter. The GUI uses only modules from
+      the standard library plus <code>oversight_core</code> itself.
+    </p>
+
+    <h2 id="launch">Launching the GUI</h2>
+    <p>Two equivalent invocations:</p>
+<pre><code>oversight gui       # subcommand on the main CLI
+oversight-gui       # dedicated entry point installed by pip</code></pre>
+    <p>
+      Both resolve to <code>cli.gui:main</code>. A single Tkinter window opens at
+      760 by 540 pixels with three tabs: <strong>Generate Keys</strong>, <strong>Seal
+      File</strong>, and <strong>Open File</strong>. Closing the window exits the process.
+    </p>
+
+    <h2 id="keygen">Tab 1: Generate Keys</h2>
+    <p>
+      Use this tab to create a new Oversight identity for an issuer or recipient. The identity
+      consists of an X25519 keypair for encryption and an Ed25519 keypair for signing.
+    </p>
+
+    <table>
+      <thead><tr><th>Field</th><th>Description</th></tr></thead>
+      <tbody>
+        <tr><td><code>Identity name</code></td><td>Human-readable identifier stored inside the key JSON. Defaults to <code>alice</code>. Any string is accepted.</td></tr>
+        <tr><td><code>Private key output</code></td><td>Path where the private identity file will be written. Use <strong>Choose Output</strong> to select a location with the native save dialog.</td></tr>
+      </tbody>
+    </table>
+
+    <p>
+      Pressing <strong>Generate Keypair</strong> writes two files next to each other:
+    </p>
+    <ul>
+      <li>The chosen path, containing the private identity (both X25519 and Ed25519 private halves). The GUI now writes this file with temp-file replacement, requests <code>0600</code> on POSIX, and applies a best-effort Windows ACL narrowing after the replacement. It refuses Windows device names such as <code>NUL</code> and blocks accidental writes over existing Oversight private-key JSON.</li>
+      <li>A sibling file with the <code>.pub.json</code> suffix containing only the public halves. This is the file you hand to an issuer who needs to seal something to you.</li>
+    </ul>
+
+    <h2 id="seal">Tab 2: Seal File</h2>
+    <p>
+      Use this tab to seal a plaintext file to a named recipient. The GUI mirrors the CLI seal
+      semantics: canonical content hash, L3 safety policy, optional L1 and L2 watermarks,
+      passive beacons, and a content fingerprint sidecar are all produced automatically.
+    </p>
+
+    <table>
+      <thead><tr><th>Field</th><th>Description</th></tr></thead>
+      <tbody>
+        <tr><td><code>Input file</code></td><td>Path to the plaintext to seal.</td></tr>
+        <tr><td><code>Issuer private key</code></td><td>Path to the issuer's private identity JSON (the file produced by the Generate Keys tab for the issuer).</td></tr>
+        <tr><td><code>Recipient public key</code></td><td>Path to the recipient's <code>.pub.json</code> file.</td></tr>
+        <tr><td><code>Sealed output</code></td><td>Where to write the <code>.sealed</code> container. If left blank the GUI uses <code>&lt;input&gt;.sealed</code>.</td></tr>
+        <tr><td><code>Registry URL</code></td><td>Registry endpoint recorded in the manifest's policy block. Defaults to <code>https://registry.oversightprotocol.dev</code>. No network call is made from the GUI at seal time; the URL is stored for later <code>open</code> policy checks.</td></tr>
+        <tr><td><code>Content type</code></td><td>MIME type recorded in the manifest. Defaults to <code>text/plain</code>. The content type also informs L3 document-class inference.</td></tr>
+        <tr><td><code>L3 mode</code></td><td>Dropdown with <code>auto</code>, <code>off</code>, <code>boilerplate</code>, <code>full</code>. <code>auto</code> picks the safest mode for the detected document class: full L3 for prose, boilerplate-only for legal or regulatory documents, and off for source code, SQL, logs, and structured data.</td></tr>
+        <tr><td><code>Embed L1/L2 watermarks</code></td><td>Checkbox, on by default. L1 (zero-width Unicode) and L2 (trailing whitespace) do not change visible bytes, so they are safe for every document class. Disabling this checkbox seals the file without any watermarks.</td></tr>
+      </tbody>
+    </table>
+
+    <h3>L3 disclosure prompt</h3>
+    <p>
+      When the selected L3 mode, document class, and content produce a decision that would
+      rewrite body text, the GUI pops a disclosure dialog before proceeding:
+    </p>
+<pre><code>L3 semantic watermarking changes visible prose. Continue?</code></pre>
+    <p>
+      Dismissing the dialog aborts the seal. Confirming applies the L3 transformation, then
+      embeds L2 and L1 on top of the L3-modified text. This matches the CLI's
+      <code>--l3-ack</code> gate: the acknowledgement is a structural step, not a checkbox you
+      forget about. The decision (mode, document class, ack) is recorded in the signed manifest
+      under <code>l3_policy</code>.
+    </p>
+
+    <h3>What the GUI writes</h3>
+    <ul>
+      <li>The <code>.sealed</code> container at the chosen output path, containing the signed manifest, wrapped DEK, AEAD nonce, and ciphertext.</li>
+      <li>If any watermarks were embedded, a sibling <code>&lt;output&gt;.fingerprint.json</code> with the <code>ContentFingerprint</code> (winnowing hashes plus sentence hashes), the recipient ID, the canonical content hash, and the l3_policy decision. This sidecar is the server-side record the registry can use for attribution if the embedded marks are later stripped.</li>
+      <li>Seal and open outputs must be different from every selected input path. Existing non-key outputs require confirmation, while private-key JSON targets are hard-blocked.</li>
+    </ul>
+
+    <p>
+      The manifest also carries a <code>canonical_content_hash</code>, which is a SHA-256 of the
+      pre-watermark plaintext. If a dispute later turns on whether the recipient received the
+      exact text of the canonical source, this hash is the anchor the comparison runs against.
+    </p>
+
+    <h2 id="open">Tab 3: Open File</h2>
+    <p>
+      Use this tab to decrypt a sealed file with the recipient's private identity. The GUI
+      verifies the manifest signature, enforces policy (time windows, max_opens, jurisdiction),
+      unwraps the DEK, AEAD-decrypts the ciphertext, and checks the content hash before writing
+      the plaintext to disk.
+    </p>
+
+    <table>
+      <thead><tr><th>Field</th><th>Description</th></tr></thead>
+      <tbody>
+        <tr><td><code>Sealed file</code></td><td>Path to the <code>.sealed</code> container.</td></tr>
+        <tr><td><code>Recipient private key</code></td><td>Path to the recipient's private identity JSON.</td></tr>
+        <tr><td><code>Plaintext output</code></td><td>Where the decrypted plaintext should be written.</td></tr>
+      </tbody>
+    </table>
+
+    <p>
+      Policy or signature failures surface as a Tkinter error dialog; successful opens show a
+      small confirmation dialog. The GUI does not print per-layer watermark diagnostics the way
+      the CLI does. For forensic attribution work, use <code>oversight attribute</code> on the
+      command line; the GUI is only for the legitimate recipient workflow.
+    </p>
+
+    <h2 id="troubleshooting">Troubleshooting</h2>
+    <table>
+      <thead><tr><th>Symptom</th><th>Cause and fix</th></tr></thead>
+      <tbody>
+        <tr>
+          <td><code>ModuleNotFoundError: No module named 'tkinter'</code></td>
+          <td>Tkinter is not installed. On Debian or Ubuntu: <code>sudo apt install python3-tk</code>. On Fedora: <code>sudo dnf install python3-tkinter</code>. On Windows and macOS Tkinter ships with the CPython installer.</td>
+        </tr>
+        <tr>
+          <td>GUI launches but <code>oversight</code> is not found</td>
+          <td>The package was installed but its scripts directory is not on <code>PATH</code>. Run <code>python -m pip show -f oversight-core | grep bin</code> to locate it, or invoke with <code>python -m cli.gui</code>.</td>
+        </tr>
+        <tr>
+          <td>Seal dialog reports that the file is not UTF-8 text</td>
+          <td>The input is binary or not valid UTF-8. Watermarking is defined only over UTF-8 plaintext. Uncheck <strong>Embed L1/L2 watermarks</strong> to seal without marks, or use the appropriate format adapter from the CLI.</td>
+        </tr>
+        <tr>
+          <td>Output path is refused as private key material</td>
+          <td>The GUI detected an Oversight private identity JSON at the output path. Choose a different destination; seal and open never overwrite private keys.</td>
+        </tr>
+        <tr>
+          <td>Open dialog reports <code>PolicyViolation</code></td>
+          <td>The manifest's policy constraints (time window, max_opens, jurisdiction) rejected the attempt. Inspect the manifest with <code>oversight inspect</code> to see which constraint applies.</td>
+        </tr>
+      </tbody>
+    </table>
+
+    <h2 id="implementation">Implementation Notes</h2>
+    <p>
+      The GUI is implemented as a single file, <code>cli/gui.py</code> (212 lines), and
+      consists of one <code>tk.Tk</code> subclass, <code>OversightGui</code>, with a
+      <code>ttk.Notebook</code> containing three frames. Each frame is built by a
+      <code>_build_*</code> method and holds its own field variables. The entry point
+      registered in <code>pyproject.toml</code> is <code>oversight-gui = "cli.gui:main"</code>,
+      and <code>oversight gui</code> resolves to the same <code>main()</code> function through
+      the main CLI's subparser.
+    </p>
+
+    <h3>Dependencies</h3>
+    <ul>
+      <li><code>tkinter</code> and <code>tkinter.ttk</code> for widgets (standard library).</li>
+      <li><code>tkinter.filedialog</code> for open and save dialogs (standard library).</li>
+      <li><code>tkinter.messagebox</code> for info, error, and yes/no prompts (standard library).</li>
+      <li><code>oversight_core</code> for all cryptographic and watermarking operations: <code>ClassicIdentity</code>, <code>Manifest</code>, <code>Recipient</code>, <code>WatermarkRef</code>, <code>seal</code>, <code>open_sealed</code>, <code>content_hash</code>, <code>watermark</code>, <code>l3_policy</code>, <code>beacon</code>, and <code>fingerprint.ContentFingerprint</code>.</li>
+    </ul>
+
+    <h3>Private key hardening</h3>
+    <p>
+      <code>_write_private_json()</code> uses <code>os.open()</code> with
+      <code>O_WRONLY | O_CREAT | O_TRUNC</code> and mode <code>0o600</code> on POSIX so new
+      private key files are created with restrictive permissions from the start rather than
+      relaxed and then tightened. On Windows the helper writes the file normally; protect the
+      enclosing directory with an ACL if the host is shared. This is the same hardening pass
+      that was applied to the CLI seal path in the v0.4.4 security cycle.
+    </p>
+
+    <h3>Window sizing and layout</h3>
+    <p>
+      The window is fixed at 760 by 540 pixels. Each tab uses a <code>ttk.Frame</code> with a
+      grid layout where column 1 expands on window resize so the file-path entries grow with
+      the window. Browse buttons call <code>tkinter.filedialog.askopenfilename()</code> or
+      <code>asksaveasfilename()</code> and write the chosen path into the entry's
+      <code>StringVar</code>.
+    </p>
+
+    <h2 id="scope">Scope and non-goals</h2>
+    <p>
+      The Tkinter starter is intentionally small. Features deliberately left out of v0.4.5
+      include: per-phase attribution diagnostics (use the CLI), registry federation views,
+      hardware-key integration (planned alongside the Rust <code>KeyProvider</code> trait),
+      multi-recipient sealing (disabled protocol-wide until the manifest can honestly bind
+      every recipient), and the drag-and-drop share workflow planned for the web viewer.
+    </p>
+    <p>
+      If you need any of those, stay on the CLI for now. The roadmap at
+      <a href="roadmap.html">docs/roadmap.html</a> tracks the web viewer, Outlook add-in, and
+      the broader launch sequence.
+    </p>
+
+  </div>
+</main>
+
+<footer class="site-footer">
+  <div class="container">
+    <p>Oversight Protocol &copy; 2026 Zion Boggan. Apache 2.0 License.</p>
+    <p style="color:var(--text-muted);font-size:13px;">Co-authored with Claude Opus 4.6 and 4.7 (Anthropic).</p>
+    <p><a href="https://github.com/oversight-protocol/oversight">GitHub</a></p>
+  </div>
+</footer>
+
+<script src="../js/nav.js" defer></script>
+</body>
+</html>

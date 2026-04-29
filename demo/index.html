@@ -1,0 +1,996 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Interactive Watermark Demo | Oversight Protocol</title>
+<meta name="description" content="Live demonstration of all three Oversight watermark layers, stripping survival, L3 attribution after full strip, and content fingerprinting.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="../css/style.css">
+<style>
+  /* Demo-specific styles */
+  .demo-section {
+    margin-top: 56px;
+  }
+  .demo-section h2 {
+    color: var(--text-primary);
+    border-bottom: 1px solid var(--border);
+    padding-bottom: 8px;
+  }
+  .demo-section > .context {
+    color: var(--text-secondary);
+    font-size: 15px;
+    line-height: 1.7;
+    margin-bottom: 20px;
+  }
+  .demo-row {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 20px;
+  }
+  @media (max-width: 768px) {
+    .demo-row { grid-template-columns: 1fr; }
+  }
+  .demo-card {
+    background: var(--bg-secondary);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 20px;
+  }
+  .demo-card h3 {
+    margin-top: 0;
+    margin-bottom: 4px;
+    font-size: 18px;
+    color: var(--text-primary);
+  }
+  .demo-card .meta {
+    font-family: var(--font-mono);
+    font-size: 12px;
+    color: var(--text-muted);
+    margin-bottom: 12px;
+  }
+  .doc-box {
+    background: var(--bg-tertiary);
+    border: 1px solid var(--border-light);
+    border-radius: 6px;
+    padding: 14px;
+    font-family: var(--font-mono);
+    font-size: 13px;
+    white-space: pre-wrap;
+    word-break: break-all;
+    min-height: 100px;
+    max-height: 320px;
+    overflow-y: auto;
+    line-height: 1.6;
+  }
+  .doc-box-tall {
+    max-height: 420px;
+  }
+  /* Zero-width character reveal colors */
+  .reveal .zwsp { background: var(--accent-blue-dim); color: #fff; padding: 0 1px; border-radius: 2px; font-size: 10px; }
+  .reveal .zwnj { background: #db61a2; color: #fff; padding: 0 1px; border-radius: 2px; font-size: 10px; }
+  .reveal .zwj  { background: var(--accent-orange); color: #000; padding: 0 1px; border-radius: 2px; font-size: 10px; }
+  .reveal .zwsp::before { content: "0"; }
+  .reveal .zwnj::before { content: "1"; }
+  .reveal .zwj::before  { content: "\25CB"; }
+  /* L3 word highlighting */
+  .l3-changed {
+    background: rgba(240, 136, 62, 0.25);
+    border: 1px solid rgba(240, 136, 62, 0.5);
+    border-radius: 3px;
+    padding: 1px 3px;
+  }
+  /* Buttons */
+  .demo-btn {
+    display: inline-block;
+    padding: 8px 16px;
+    border-radius: 6px;
+    font-weight: 600;
+    font-size: 14px;
+    border: none;
+    cursor: pointer;
+    transition: background 0.15s, transform 0.1s;
+    margin-right: 8px;
+    margin-bottom: 8px;
+  }
+  .demo-btn:hover { transform: translateY(-1px); }
+  .demo-btn:active { transform: translateY(0); }
+  .demo-btn-primary {
+    background: #238636;
+    color: #fff;
+  }
+  .demo-btn-primary:hover { background: #2ea043; }
+  .demo-btn-secondary {
+    background: var(--border);
+    color: var(--text-primary);
+  }
+  .demo-btn-secondary:hover { background: #484f58; }
+  .demo-btn-accent {
+    background: var(--accent-blue-dim);
+    color: #fff;
+  }
+  .demo-btn-accent:hover { background: #2d7de0; }
+  .demo-btn-danger {
+    background: rgba(248, 81, 73, 0.2);
+    color: var(--accent-red);
+    border: 1px solid rgba(248, 81, 73, 0.3);
+  }
+  .demo-btn-danger:hover { background: rgba(248, 81, 73, 0.3); }
+  .demo-btn.active {
+    outline: 2px solid var(--accent-blue);
+    outline-offset: 1px;
+  }
+  .demo-btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+    transform: none;
+  }
+  /* Legend */
+  .legend {
+    font-size: 13px;
+    color: var(--text-secondary);
+    margin-top: 8px;
+  }
+  .legend .swatch {
+    display: inline-block;
+    width: 12px;
+    height: 12px;
+    margin: 0 4px 0 14px;
+    vertical-align: middle;
+    border-radius: 2px;
+  }
+  /* Status indicators */
+  .status-panel {
+    display: flex;
+    gap: 16px;
+    flex-wrap: wrap;
+    margin-top: 16px;
+    padding: 14px 16px;
+    background: var(--bg-tertiary);
+    border: 1px solid var(--border-light);
+    border-radius: 6px;
+    font-family: var(--font-mono);
+    font-size: 13px;
+  }
+  .status-item {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+  .status-dot {
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    flex-shrink: 0;
+  }
+  .status-dot.alive { background: var(--accent-green); box-shadow: 0 0 6px rgba(63, 185, 80, 0.5); }
+  .status-dot.dead  { background: var(--accent-red); box-shadow: 0 0 6px rgba(248, 81, 73, 0.5); }
+  .status-label { color: var(--text-secondary); }
+  .status-value-alive { color: var(--accent-green); font-weight: 600; }
+  .status-value-dead  { color: var(--accent-red); font-weight: 600; }
+  /* Attribution phases */
+  .phase-log {
+    background: var(--bg-tertiary);
+    border: 1px solid var(--border-light);
+    border-radius: 6px;
+    padding: 16px;
+    font-family: var(--font-mono);
+    font-size: 13px;
+    line-height: 2;
+    min-height: 180px;
+    margin-top: 12px;
+  }
+  .phase-line {
+    opacity: 0;
+    transition: opacity 0.3s ease;
+  }
+  .phase-line.visible {
+    opacity: 1;
+  }
+  .phase-red { color: var(--accent-red); }
+  .phase-green { color: var(--accent-green); }
+  .phase-blue { color: var(--accent-blue); }
+  .phase-orange { color: var(--accent-orange); }
+  .phase-muted { color: var(--text-muted); }
+  /* Verdict box */
+  .verdict {
+    font-size: 20px;
+    font-weight: 700;
+    padding: 20px 24px;
+    border-radius: 8px;
+    margin-top: 16px;
+    text-align: center;
+    font-family: var(--font-mono);
+    letter-spacing: -0.01em;
+    transition: all 0.4s ease;
+  }
+  .v-match-alice { background: rgba(31, 111, 235, 0.18); color: var(--accent-blue); border: 1px solid rgba(31, 111, 235, 0.3); }
+  .v-match-bob   { background: rgba(248, 81, 73, 0.18); color: var(--accent-red); border: 1px solid rgba(248, 81, 73, 0.3); }
+  .v-none        { background: var(--bg-secondary); color: var(--text-secondary); border: 1px solid var(--border); }
+  .v-pending     { background: rgba(240, 136, 62, 0.12); color: var(--accent-orange); border: 1px solid rgba(240, 136, 62, 0.3); }
+  /* Diff table */
+  .diff-table {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 16px 0;
+    font-size: 14px;
+  }
+  .diff-table th {
+    font-weight: 600;
+    color: var(--text-secondary);
+    font-size: 12px;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    text-align: left;
+    padding: 8px 12px;
+    border-bottom: 2px solid var(--border);
+  }
+  .diff-table td {
+    padding: 6px 12px;
+    border-bottom: 1px solid var(--border-light);
+    font-family: var(--font-mono);
+    font-size: 13px;
+  }
+  .diff-table .idx-col { color: var(--text-muted); width: 60px; }
+  .diff-orig { color: var(--text-secondary); }
+  .diff-alice { color: var(--accent-blue); font-weight: 500; }
+  .diff-bob { color: var(--accent-red); font-weight: 500; }
+  .diff-same { color: var(--text-muted); font-style: italic; }
+  /* Info boxes for explainer sections */
+  .info-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+    gap: 16px;
+    margin: 20px 0;
+  }
+  .info-box {
+    background: var(--bg-secondary);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 20px;
+  }
+  .info-box h4 {
+    margin: 0 0 6px;
+    font-size: 15px;
+    color: var(--accent-blue);
+    font-weight: 600;
+  }
+  .info-box p {
+    margin: 0;
+    font-size: 14px;
+    color: var(--text-secondary);
+    line-height: 1.6;
+  }
+  .info-box code {
+    font-size: 12px;
+  }
+  /* Pipeline steps */
+  .pipeline-steps {
+    display: flex;
+    align-items: flex-start;
+    gap: 0;
+    flex-wrap: wrap;
+    margin: 24px 0;
+  }
+  .pipeline-step {
+    background: var(--bg-secondary);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 16px 18px;
+    flex: 1;
+    min-width: 180px;
+    text-align: center;
+  }
+  .pipeline-step .step-num {
+    font-family: var(--font-mono);
+    font-size: 12px;
+    color: var(--accent-blue);
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    margin-bottom: 6px;
+  }
+  .pipeline-step h4 {
+    margin: 0 0 4px;
+    font-size: 15px;
+    color: var(--text-primary);
+  }
+  .pipeline-step p {
+    margin: 0;
+    font-size: 13px;
+    color: var(--text-secondary);
+    line-height: 1.5;
+  }
+  .pipeline-arrow {
+    display: flex;
+    align-items: center;
+    padding: 0 6px;
+    color: var(--text-muted);
+    font-size: 20px;
+    align-self: center;
+  }
+  @media (max-width: 768px) {
+    .pipeline-steps { flex-direction: column; align-items: stretch; }
+    .pipeline-arrow { justify-content: center; transform: rotate(90deg); padding: 4px 0; }
+  }
+  /* Source selector tabs */
+  .source-tabs {
+    display: flex;
+    gap: 8px;
+    margin-bottom: 12px;
+  }
+  .source-tab {
+    padding: 6px 14px;
+    border-radius: 6px;
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+    border: 1px solid var(--border);
+    background: var(--bg-tertiary);
+    color: var(--text-secondary);
+    transition: all 0.15s;
+  }
+  .source-tab:hover { border-color: #484f58; color: var(--text-primary); }
+  .source-tab.active-alice { border-color: var(--accent-blue); color: var(--accent-blue); background: rgba(31, 111, 235, 0.1); }
+  .source-tab.active-bob { border-color: var(--accent-red); color: var(--accent-red); background: rgba(248, 81, 73, 0.1); }
+  /* Scroll hint */
+  .section-note {
+    font-size: 13px;
+    color: var(--text-muted);
+    font-style: italic;
+    margin-top: 6px;
+  }
+</style>
+</head>
+<body>
+
+<nav class="site-nav">
+  <div class="nav-inner">
+    <a href="../" class="nav-brand"><span>Oversight</span> Protocol</a>
+    <ul class="nav-links">
+      <li><a href="../">Home</a></li>
+      <li><a href="../demo/" class="active">Demo</a></li>
+      <li><a href="../docs/">Docs</a></li>
+      <li><a href="../research/">Research</a></li>
+      <li><a href="../blog/">Blog</a></li>
+      <li><a href="../about.html">About</a></li>
+    </ul>
+  </div>
+</nav>
+
+<main>
+<div class="container">
+
+  <div class="page-header">
+    <h1>Interactive Watermark Demo</h1>
+    <p class="subtitle">
+      One document, two recipients, three watermark layers. Explore how Oversight
+      embeds invisible marks, how stripping attacks destroy some layers but not others,
+      and how L3 semantic watermarks survive even a complete formatting wipe.
+    </p>
+  </div>
+
+  <!-- ========== Section 1: Original Document ========== -->
+  <div class="demo-section">
+    <h2>1. The Original Document</h2>
+    <p class="context">
+      Below is a confidential memo before any watermarking. This is the clean source
+      text that an issuer would seal and distribute. No hidden marks, no invisible
+      characters, no synonym rotations. Plain, unmodified text.
+    </p>
+    <div class="demo-card">
+      <h3>Source Document <span class="badge badge-green">clean</span></h3>
+      <div class="doc-box" id="original"></div>
+    </div>
+  </div>
+
+  <!-- ========== Section 2: Watermarked Copies (All 3 Layers) ========== -->
+  <div class="demo-section">
+    <h2>2. Two Watermarked Copies (All 3 Layers)</h2>
+    <p class="context">
+      The same document is distributed to two recipients: Alice and Bob.
+      Each copy contains all three watermark layers: L1 zero-width characters embedded in the text,
+      L2 trailing whitespace patterns at line endings, and L3 synonym rotations
+      that change specific words to encode the recipient's identity. The result looks
+      identical to the human eye, but every copy carries a unique forensic fingerprint.
+    </p>
+
+    <div style="margin-bottom: 16px;">
+      <button class="demo-btn demo-btn-primary" onclick="toggleL1Reveal()" id="revealL1Btn">Reveal L1 (invisible marks)</button>
+      <button class="demo-btn demo-btn-accent" onclick="toggleL3Highlight()" id="revealL3Btn">Show L3 Word Changes</button>
+      <div class="legend" id="l1Legend" style="display:none;">L1 encoding:
+        <span class="swatch" style="background:#1f6feb"></span>ZWSP = bit 0
+        <span class="swatch" style="background:#db61a2"></span>ZWNJ = bit 1
+        <span class="swatch" style="background:#f0883e"></span>ZWJ = frame delimiter
+      </div>
+      <div class="legend" id="l3Legend" style="display:none;">L3 encoding:
+        <span class="swatch" style="background:rgba(240,136,62,0.25);border:1px solid rgba(240,136,62,0.5)"></span>Word changed by synonym rotation (differs from original)
+      </div>
+    </div>
+
+    <div class="demo-row">
+      <div class="demo-card">
+        <h3>Alice's Copy <span style="color:var(--accent-blue);">&#9679;</span></h3>
+        <div class="meta">mark_id = <code id="aliceMark"></code> &middot; <span id="aliceSize"></span> bytes</div>
+        <div class="doc-box doc-box-tall" id="aliceDoc"></div>
+      </div>
+      <div class="demo-card">
+        <h3>Bob's Copy <span style="color:var(--accent-red);">&#9679;</span></h3>
+        <div class="meta">mark_id = <code id="bobMark"></code> &middot; <span id="bobSize"></span> bytes</div>
+        <div class="doc-box doc-box-tall" id="bobDoc"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ========== Section 3: The Stripping Attack ========== -->
+  <div class="demo-section">
+    <h2>3. The Stripping Attack</h2>
+    <p class="context">
+      An adversary who suspects watermarking will attempt to strip invisible characters
+      before sharing the document. Below, you can simulate three levels of attack against
+      Alice's watermarked copy. Watch how each attack destroys certain layers while L3 remains
+      untouched, because its signal lives in the word choices, not in formatting.
+    </p>
+
+    <div class="demo-card">
+      <div style="margin-bottom: 12px;">
+        <button class="demo-btn demo-btn-danger" id="stripL1Btn" onclick="stripLevel(1)">Strip L1 (invisible chars)</button>
+        <button class="demo-btn demo-btn-danger" id="stripL1L2Btn" onclick="stripLevel(2)">Strip L1+L2 (invisible + whitespace)</button>
+        <button class="demo-btn demo-btn-danger" id="stripAllBtn" onclick="stripLevel(3)">Strip ALL formatting (VM export)</button>
+        <button class="demo-btn demo-btn-secondary" onclick="stripReset()" style="margin-left:8px;">Reset</button>
+      </div>
+      <div class="doc-box doc-box-tall" id="strippedDoc" style="min-height:140px;"></div>
+
+      <div class="status-panel" id="stripStatus">
+        <div class="status-item">
+          <span class="status-dot alive"></span>
+          <span class="status-label">L1 (zero-width):</span>
+          <span class="status-value-alive" id="statusL1">INTACT</span>
+        </div>
+        <div class="status-item">
+          <span class="status-dot alive"></span>
+          <span class="status-label">L2 (whitespace):</span>
+          <span class="status-value-alive" id="statusL2">INTACT</span>
+        </div>
+        <div class="status-item">
+          <span class="status-dot alive"></span>
+          <span class="status-label">L3 (semantic):</span>
+          <span class="status-value-alive" id="statusL3">INTACT</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ========== Section 4: Attribution After Stripping ========== -->
+  <div class="demo-section">
+    <h2>4. Attribution After Stripping</h2>
+    <p class="context">
+      This is the core demonstration. Even after every invisible character and whitespace
+      pattern has been destroyed, the attribution pipeline can still identify the source
+      recipient using L3 semantic verification and content fingerprinting. Select a
+      stripped copy and run the full 5-phase pipeline.
+    </p>
+
+    <div class="demo-card">
+      <div class="source-tabs">
+        <div class="source-tab active-alice" id="tabAlice" onclick="selectSource('alice')">Test with Alice's stripped copy</div>
+        <div class="source-tab" id="tabBob" onclick="selectSource('bob')">Test with Bob's stripped copy</div>
+      </div>
+
+      <button class="demo-btn demo-btn-primary" onclick="runAttribution()" id="attrBtn">Run 5-Phase Attribution</button>
+      <button class="demo-btn demo-btn-secondary" onclick="resetAttribution()">Reset</button>
+
+      <div class="phase-log" id="phaseLog">
+        <div style="color:var(--text-muted);">Click "Run 5-Phase Attribution" to begin the analysis.</div>
+      </div>
+
+      <div class="verdict v-none" id="verdict">Awaiting attribution.</div>
+    </div>
+  </div>
+
+  <!-- ========== Section 5: How L3 Survives (Visual Diff) ========== -->
+  <div class="demo-section">
+    <h2>5. How L3 Survives (Visual Diff)</h2>
+    <p class="context">
+      L3 encodes the recipient's identity by rotating words through synonym classes.
+      Each recipient gets a different set of synonyms, drawn from 151 word classes
+      (verbs, adjectives, adverbs, nouns, connectors), 25 British/American spelling
+      variants, 30 contraction choices, and number formatting rules. The table below
+      shows every word that differs between the original and each recipient's copy.
+      Because these changes exist in the content itself, no amount of invisible-character
+      stripping, format conversion, or even screenshot-to-OCR can erase them.
+    </p>
+
+    <div class="demo-card" style="overflow-x:auto;">
+      <table class="diff-table" id="diffTable">
+        <thead>
+          <tr>
+            <th class="idx-col">Word #</th>
+            <th>Original</th>
+            <th>Alice's Version</th>
+            <th>Bob's Version</th>
+          </tr>
+        </thead>
+        <tbody id="diffBody"></tbody>
+      </table>
+    </div>
+    <p class="section-note">
+      15 word substitutions per copy shown above. In production, the rotation pool is larger;
+      this demo uses a representative subset to illustrate the mechanism.
+    </p>
+  </div>
+
+  <!-- ========== Section 6: The Watermark Layers ========== -->
+  <div class="demo-section">
+    <h2>6. The Three Watermark Layers</h2>
+    <p class="context">
+      Oversight Protocol applies watermarks at three independent layers, each targeting
+      a different threat model. If one layer is stripped, the remaining layers can still
+      provide attribution.
+    </p>
+
+    <div class="info-grid">
+      <div class="info-box">
+        <h4>L1: Zero-Width Characters</h4>
+        <p>
+          Unicode code points U+200B (ZWSP), U+200C (ZWNJ), and U+200D (ZWJ) are inserted
+          into the plaintext at deterministic positions. ZWSP and ZWNJ encode binary 0 and 1
+          respectively; ZWJ pairs serve as frame delimiters. This layer survives copy-paste
+          and most text reformatting.
+        </p>
+      </div>
+      <div class="info-box">
+        <h4>L2: Trailing Whitespace Patterns</h4>
+        <p>
+          Each line ending encodes one bit via trailing space (bit 0) or trailing tab (bit 1).
+          The mark_id is distributed across the first N lines of the document. This layer
+          survives most editors and format conversions that preserve line structure, but is
+          defeated by trailing-whitespace normalization.
+        </p>
+      </div>
+      <div class="info-box">
+        <h4>L3: Semantic Rotation (151 classes)</h4>
+        <p>
+          Synonym rotation across 151 word classes (verbs, adjectives, adverbs, nouns, connectors)
+          encodes bits in the choice of words themselves. Additional channels: 25 British/American
+          spelling variants, 30 contraction choices, punctuation style (Oxford comma, dash style,
+          quote style), and number formatting. These marks survive format conversion, invisible-char
+          stripping, and screenshot/OCR because they exist in the content, not the formatting.
+        </p>
+      </div>
+      <div class="info-box">
+        <h4>Content Fingerprinting (server-side)</h4>
+        <p>
+          When all embedded watermarks are stripped (VM-export attack), a server-side content
+          fingerprint database identifies which recipient's copy was leaked. Winnowing hash
+          fingerprints and sentence-level content hashes are computed at seal time and stored
+          alongside the sealed file. At attribution time, the leaked text's fingerprint is
+          compared against all stored copies via Jaccard similarity.
+        </p>
+      </div>
+    </div>
+  </div>
+
+  <!-- ========== Section 7: The Attribution Pipeline ========== -->
+  <div class="demo-section">
+    <h2>7. The Attribution Pipeline (5 Phases)</h2>
+    <p class="context">
+      When leaked text is recovered, the attribution pipeline runs five phases to identify
+      the source recipient, combining evidence from all available layers.
+    </p>
+
+    <div class="pipeline-steps">
+      <div class="pipeline-step">
+        <div class="step-num">Phase 1</div>
+        <h4>Direct Extract</h4>
+        <p>Scan for L1 zero-width frames and L2 trailing whitespace patterns. Partial L2 recovery reports confidence instead of failing silently.</p>
+      </div>
+      <span class="pipeline-arrow">&#8594;</span>
+      <div class="pipeline-step">
+        <div class="step-num">Phase 2</div>
+        <h4>Registry Query</h4>
+        <p>Look up recovered mark_ids against the registry at <code>registry.oversightprotocol.dev</code> and fetch candidate mark_ids for L3 verification.</p>
+      </div>
+      <span class="pipeline-arrow">&#8594;</span>
+      <div class="pipeline-step">
+        <div class="step-num">Phase 3</div>
+        <h4>L3 Semantic Verify</h4>
+        <p>Test each candidate mark_id against the leaked text's synonym choices, spelling, contractions, and punctuation. Score each candidate.</p>
+      </div>
+      <span class="pipeline-arrow">&#8594;</span>
+      <div class="pipeline-step">
+        <div class="step-num">Phase 4</div>
+        <h4>Bayesian Fusion</h4>
+        <p>Combine L1, L2, and L3 evidence into ranked candidates using <code>1 - product(1-s_i)</code> independence-assumption scoring.</p>
+      </div>
+      <span class="pipeline-arrow">&#8594;</span>
+      <div class="pipeline-step">
+        <div class="step-num">Phase 5</div>
+        <h4>Fingerprint Match</h4>
+        <p>When all embedded marks are stripped, compare the leaked text's winnowing and sentence hashes against stored per-recipient fingerprints.</p>
+      </div>
+    </div>
+
+    <p class="context">
+      Each recipient registration produces a signed DSSE attestation recorded in Sigstore's Rekor v2
+      transparency log, providing a tamper-evident, publicly auditable record that the mark
+      was assigned before the leak occurred. Any auditor can verify the attestation using
+      standard Sigstore tooling without Oversight-specific code.
+    </p>
+  </div>
+
+  <!-- ========== Section 8: The .sealed Format ========== -->
+  <div class="demo-section">
+    <h2>8. The <code>.sealed</code> File Format</h2>
+    <p class="context">
+      On disk, every watermarked document is stored as a <code>.sealed</code> binary file.
+      The format is compact, self-describing, and designed for both confidentiality and
+      tamper-evidence. Below is the binary layout.
+    </p>
+
+    <div class="demo-card">
+<pre><code>+--------+----------+-------+-------------------------------------------+
+| Offset | Size     | Field | Description                               |
++--------+----------+-------+-------------------------------------------+
+| 0      | 6 bytes  | Magic | b"OSGT\x01\x00" (file signature)         |
+| 6      | 1 byte   | FVer  | Format version (1)                        |
+| 7      | 1 byte   | Suite | 0x01=CLASSIC, 0x02=HYBRID (PQ)           |
+| 8      | 4 bytes  | MLen  | Manifest length (u32, big-endian)         |
+| 12     | MLen     | Man.  | Canonical JSON manifest, Ed25519 signed   |
+| 12+M   | 4 bytes  | WLen  | Wrapped DEK length (u32, big-endian)      |
+| 16+M   | WLen     | WDEK  | Wrapped DEK (ephemeral pub + nonce + key) |
+| ...    | 24 bytes | Nonce | XChaCha20-Poly1305 nonce                  |
+| ...    | 4 bytes  | CLen  | Ciphertext length (u32, big-endian)       |
+| ...    | CLen     | CT    | AEAD ciphertext (AAD = content_hash)      |
++--------+----------+-------+-------------------------------------------+</code></pre>
+    </div>
+
+    <p class="context">
+      The JSON manifest contains the document identifier, issuer public key, recipient public key,
+      creation timestamp, and a digital signature over the canonical JSON encoding.
+      Because the manifest is in cleartext, any third party can verify the issuer's signature
+      without needing the recipient's private key. The watermarked plaintext is only accessible
+      after the recipient unwraps the DEK with their X25519 secret key and decrypts the ciphertext.
+    </p>
+  </div>
+
+</div><!-- /.container -->
+</main>
+
+<footer class="site-footer">
+  <div class="container">
+    <p>Oversight Protocol &copy; 2026 Zion Boggan. Apache 2.0 License.</p>
+    <p style="color:var(--text-muted);font-size:13px;">Co-authored with Claude Opus 4.6 and 4.7 (Anthropic).</p>
+    <p><a href="https://github.com/oversight-protocol/oversight">GitHub</a></p>
+  </div>
+</footer>
+
+<script>
+// ============================================================
+// DATA: Inlined from demo_data.json
+// ============================================================
+const DATA = {"original":"CONFIDENTIAL: Acme Corp Q3 2026 Strategy\n\nThe board will begin reviewing the large infrastructure migration plan this week.\nEngineering plans to use a fast deployment approach to find and fix critical issues\nbefore the October deadline. We need to show results quickly and tell stakeholders\nabout our progress at the quarterly review.\n\nThe team will help the London office get through the transition. Sarah Chen will\nprovide guidance as the new VP of Engineering. We expect to end the legacy system\ncontracts by September and start the migration on October first.\n\nKey budget details: the program requires approximately 4.2 million dollars.\nWe plan to reduce cloud spending by about 60 percent over eighteen months. The\nfinance team should begin tracking these changes immediately.\n\nEarly access customers include Meridian Corp and NovaTech Solutions. Each has\nsigned a large confidentiality agreement. Do not discuss pricing externally.\nThe enterprise product launches in September with initial pricing at 2400 dollars\nper seat annually. Revenue targets for Q3 remain at 12.8 million dollars.\n\nThis document is confidential. Unauthorized distribution will be investigated.","alice":"PRIVATE: Acme Corp Q3 2,026 Approach\t\n \nT\u200d\u200c\u200b\u200c\u200b\u200b\u200b\u200b\u200c\u200c\u200b\u200c\u200c\u200b\u200b\u200c\u200b\u200c\u200c\u200b\u200b\u200b\u200b\u200c\u200c\u200c\u200c\u200b\u200c\u200b\u200c\u200b\u200b\u200c\u200c\u200c\u200b\u200b\u200c\u200b\u200c\u200c\u200c\u200c\u200c\u200b\u200c\u200c\u200b\u200b\u200b\u200b\u200b\u200b\u200c\u200c\u200c\u200b\u200b\u200b\u200c\u200c\u200b\u200b\u200b\u200dhe board will commence reviewing the sub\u200d\u200c\u200b\u200c\u200b\u200b\u200b\u200b\u200c\u200c\u200b\u200c\u200c\u200b\u200b\u200c\u200b\u200c\u200c\u200b\u200b\u200b\u200b\u200c\u200c\u200c\u200c\u200b\u200c\u200b\u200c\u200b\u200b\u200c\u200c\u200c\u200b\u200b\u200c\u200b\u200c\u200c\u200c\u200c\u200c\u200b\u200c\u200c\u200b\u200b\u200b\u200b\u200b\u200b\u200c\u200c\u200c\u200b\u200b\u200b\u200c\u200c\u200b\u200b\u200b\u200dstantial infrastructure migration approa\u200d\u200c\u200b\u200c\u200b\u200b\u200b\u200b\u200c\u200c\u200b\u200c\u200c\u200b\u200b\u200c\u200b\u200c\u200c\u200b\u200b\u200b\u200b\u200c\u200c\u200c\u200c\u200b\u200c\u200b\u200c\u200b\u200b\u200c\u200c\u200c\u200b\u200b\u200c\u200b\u200c\u200c\u200c\u200c\u200c\u200b\u200c\u200c\u200b\u200b\u200b\u200b\u200b\u200b\u200c\u200c\u200c\u200b\u200b\u200b\u200c\u200c\u200b\u200b\u200b\u200dch this week.\t\nEngineering plans to use \u200d\u200c\u200b\u200c\u200b\u200b\u200b\u200b\u200c\u200c\u200b\u200c\u200c\u200b\u200b\u200c\u200b\u200c\u200c\u200b\u200b\u200b\u200b\u200c\u200c\u200c\u200c\u200b\u200c\u200b\u200c\u200b\u200b\u200c\u200c\u200c\u200b\u200b\u200c\u200b\u200c\u200c\u200c\u200c\u200c\u200b\u200c\u200c\u200b\u200b\u200b\u200b\u200b\u200b\u200c\u200c\u200c\u200b\u200b\u200b\u200c\u200c\u200b\u200b\u200b\u200da fast deployment strategy to find and f\u200d\u200c\u200b\u200c\u200b\u200b\u200b\u200b\u200c\u200c\u200b\u200c\u200c\u200b\u200b\u200c\u200b\u200c\u200c\u200b\u200b\u200b\u200b\u200c\u200c\u200c\u200c\u200b\u200c\u200b\u200c\u200b\u200b\u200c\u200c\u200c\u200b\u200b\u200c\u200b\u200c\u200c\u200c\u200c\u200c\u200b\u200c\u200c\u200b\u200b\u200b\u200b\u200b\u200b\u200c\u200c\u200c\u200b\u200b\u200b\u200c\u200c\u200b\u200b\u200b\u200dix critical issues \nbefore the October d\u200d\u200c\u200b\u200c\u200b\u200b\u200b\u200b\u200c\u200c\u200b\u200c\u200c\u200b\u200b\u200c\u200b\u200c\u200c\u200b\u200b\u200b\u200b\u200c\u200c\u200c\u200c\u200b\u200c\u200b\u200c\u200b\u200b\u200c\u200c\u200c\u200b\u200b\u200c\u200b\u200c\u200c\u200c\u200c\u200c\u200b\u200c\u200c\u200b\u200b\u200b\u200b\u200b\u200b\u200c\u200c\u200c\u200b\u200b\u200b\u200c\u200c\u200b\u200b\u200b\u200deadline. We desire to show results swift\u200d\u200c\u200b\u200c\u200b\u200b\u200b\u200b\u200c\u200c\u200b\u200c\u200c\u200b\u200b\u200c\u200b\u200c\u200c\u200b\u200b\u200b\u200b\u200c\u200c\u200c\u200c\u200b\u200c\u200b\u200c\u200b\u200b\u200c\u200c\u200c\u200b\u200b\u200c\u200b\u200c\u200c\u200c\u200c\u200c\u200b\u200c\u200c\u200b\u200b\u200b\u200b\u200b\u200b\u200c\u200c\u200c\u200b\u200b\u200b\u200c\u200c\u200b\u200b\u200b\u200dly and inform stakeholders \nabout our pr\u200d\u200c\u200b\u200c\u200b\u200b\u200b\u200b\u200c\u200c\u200b\u200c\u200c\u200b\u200b\u200c\u200b\u200c\u200c\u200b\u200b\u200b\u200b\u200c\u200c\u200c\u200c\u200b\u200c\u200b\u200c\u200b\u200b\u200c\u200c\u200c\u200b\u200b\u200c\u200b\u200c\u200c\u200c\u200c\u200c\u200b\u200c\u200c\u200b\u200b\u200b\u200b\u200b\u200b\u200c\u200c\u200c\u200b\u200b\u200b\u200c\u200c\u200b\u200b\u200b\u200dogress at the quarterly examine. \n \nThe \u200d\u200c\u200b\u200c\u200b\u200b\u200b\u200b\u200c\u200c\u200b\u200c\u200c\u200b\u200b\u200c\u200b\u200c\u200c\u200b\u200b\u200b\u200b\u200c\u200c\u200c\u200c\u200b\u200c\u200b\u200c\u200b\u200b\u200c\u200c\u200c\u200b\u200b\u200c\u200b\u200c\u200c\u200c\u200c\u200c\u200b\u200c\u200c\u200b\u200b\u200b\u200b\u200b\u200b\u200c\u200c\u200c\u200b\u200b\u200b\u200c\u200c\u200b\u200b\u200b\u200dteam will help the London office get thr\u200d\u200c\u200b\u200c\u200b\u200b\u200b\u200b\u200c\u200c\u200b\u200c\u200c\u200b\u200b\u200c\u200b\u200c\u200c\u200b\u200b\u200b\u200b\u200c\u200c\u200c\u200c\u200b\u200c\u200b\u200c\u200b\u200b\u200c\u200c\u200c\u200b\u200b\u200c\u200b\u200c\u200c\u200c\u200c\u200c\u200b\u200c\u200c\u200b\u200b\u200b\u200b\u200b\u200b\u200c\u200c\u200c\u200b\u200b\u200b\u200c\u200c\u200b\u200b\u200b\u200dough the transition. Sarah Chen will\t\ngi\u200d\u200c\u200b\u200c\u200b\u200b\u200b\u200b\u200c\u200c\u200b\u200c\u200c\u200b\u200b\u200c\u200b\u200c\u200c\u200b\u200b\u200b\u200b\u200c\u200c\u200c\u200c\u200b\u200c\u200b\u200c\u200b\u200b\u200c\u200c\u200c\u200b\u200b\u200c\u200b\u200c\u200c\u200c\u200c\u200c\u200b\u200c\u200c\u200b\u200b\u200b\u200b\u200b\u200b\u200c\u200c\u200c\u200b\u200b\u200b\u200c\u200c\u200b\u200b\u200b\u200dve guidance because the recent VP of Eng\u200d\u200c\u200b\u200c\u200b\u200b\u200b\u200b\u200c\u200c\u200b\u200c\u200c\u200b\u200b\u200c\u200b\u200c\u200c\u200b\u200b\u200b\u200b\u200c\u200c\u200c\u200c\u200b\u200c\u200b\u200c\u200b\u200b\u200c\u200c\u200c\u200b\u200b\u200c\u200b\u200c\u200c\u200c\u200c\u200c\u200b\u200c\u200c\u200b\u200b\u200b\u200b\u200b\u200b\u200c\u200c\u200c\u200b\u200b\u200b\u200c\u200c\u200b\u200b\u200b\u200dineering. We expect to conclude the lega\u200d\u200c\u200b\u200c\u200b\u200b\u200b\u200b\u200c\u200c\u200b\u200c\u200c\u200b\u200b\u200c\u200b\u200c\u200c\u200b\u200b\u200b\u200b\u200c\u200c\u200c\u200c\u200b\u200c\u200b\u200c\u200b\u200b\u200c\u200c\u200c\u200b\u200b\u200c\u200b\u200c\u200c\u200c\u200c\u200c\u200b\u200c\u200c\u200b\u200b\u200b\u200b\u200b\u200b\u200c\u200c\u200c\u200b\u200b\u200b\u200c\u200c\u200b\u200b\u200b\u200dcy structure\t\ncontracts by September and\u200d\u200c\u200b\u200c\u200b\u200b\u200b\u200b\u200c\u200c\u200b\u200c\u200c\u200b\u200b\u200c\u200b\u200c\u200c\u200b\u200b\u200b\u200b\u200c\u200c\u200c\u200c\u200b\u200c\u200b\u200c\u200b\u200b\u200c\u200c\u200c\u200b\u200b\u200c\u200b\u200c\u200c\u200c\u200c\u200c\u200b\u200c\u200c\u200b\u200b\u200b\u200b\u200b\u200b\u200c\u200c\u200c\u200b\u200b\u200b\u200c\u200c\u200b\u200b\u200b\u200d commence the migration on October first\u200d\u200c\u200b\u200c\u200b\u200b\u200b\u200b\u200c\u200c\u200b\u200c\u200c\u200b\u200b\u200c\u200b\u200c\u200c\u200b\u200b\u200b\u200b\u200c\u200c\u200c\u200c\u200b\u200c\u200b\u200c\u200b\u200b\u200c\u200c\u200c\u200b\u200b\u200c\u200b\u200c\u200c\u200c\u200c\u200c\u200b\u200c\u200c\u200b\u200b\u200b\u200b\u200b\u200b\u200c\u200c\u200c\u200b\u200b\u200b\u200c\u200c\u200b\u200b\u200b\u200d. \n\t\nKey budget details: the program req\u200d\u200c\u200b\u200c\u200b\u200b\u200b\u200b\u200c\u200c\u200b\u200c\u200c\u200b\u200b\u200c\u200b\u200c\u200c\u200b\u200b\u200b\u200b\u200c\u200c\u200c\u200c\u200b\u200c\u200b\u200c\u200b\u200b\u200c\u200c\u200c\u200b\u200b\u200c\u200b\u200c\u200c\u200c\u200c\u200c\u200b\u200c\u200c\u200b\u200b\u200b\u200b\u200b\u200b\u200c\u200c\u200c\u200b\u200b\u200b\u200c\u200c\u200b\u200b\u200b\u200duires approximately 4.2 million dollars.\u200d\u200c\u200b\u200c\u200b\u200b\u200b\u200b\u200c\u200c\u200b\u200c\u200c\u200b\u200b\u200c\u200b\u200c\u200c\u200b\u200b\u200b\u200b\u200c\u200c\u200c\u200c\u200b\u200c\u200b\u200c\u200b\u200b\u200c\u200c\u200c\u200b\u200b\u200c\u200b\u200c\u200c\u200c\u200c\u200c\u200b\u200c\u200c\u200b\u200b\u200b\u200b\u200b\u200b\u200c\u200c\u200c\u200b\u200b\u200b\u200c\u200c\u200b\u200b\u200b\u200d\t\nWe plan to lower cloud spending by abo\u200d\u200c\u200b\u200c\u200b\u200b\u200b\u200b\u200c\u200c\u200b\u200c\u200c\u200b\u200b\u200c\u200b\u200c\u200c\u200b\u200b\u200b\u200b\u200c\u200c\u200c\u200c\u200b\u200c\u200b\u200c\u200b\u200b\u200c\u200c\u200c\u200b\u200b\u200c\u200b\u200c\u200c\u200c\u200c\u200c\u200b\u200c\u200c\u200b\u200b\u200b\u200b\u200b\u200b\u200c\u200c\u200c\u200b\u200b\u200b\u200c\u200c\u200b\u200b\u200b\u200dut 60 percent over eighteen months. The \u200d\u200c\u200b\u200c\u200b\u200b\u200b\u200b\u200c\u200c\u200b\u200c\u200c\u200b\u200b\u200c\u200b\u200c\u200c\u200b\u200b\u200b\u200b\u200c\u200c\u200c\u200c\u200b\u200c\u200b\u200c\u200b\u200b\u200c\u200c\u200c\u200b\u200b\u200c\u200b\u200c\u200c\u200c\u200c\u200c\u200b\u200c\u200c\u200b\u200b\u200b\u200b\u200b\u200b\u200c\u200c\u200c\u200b\u200b\u200b\u200c\u200c\u200b\u200b\u200b\u200d\nfinance team should commence tracking t\u200d\u200c\u200b\u200c\u200b\u200b\u200b\u200b\u200c\u200c\u200b\u200c\u200c\u200b\u200b\u200c\u200b\u200c\u200c\u200b\u200b\u200b\u200b\u200c\u200c\u200c\u200c\u200b\u200c\u200b\u200c\u200b\u200b\u200c\u200c\u200c\u200b\u200b\u200c\u200b\u200c\u200c\u200c\u200c\u200c\u200b\u200c\u200c\u200b\u200b\u200b\u200b\u200b\u200b\u200c\u200c\u200c\u200b\u200b\u200b\u200c\u200c\u200b\u200b\u200b\u200dhese changes promptly. \n\t\nPreliminary ac\u200d\u200c\u200b\u200c\u200b\u200b\u200b\u200b\u200c\u200c\u200b\u200c\u200c\u200b\u200b\u200c\u200b\u200c\u200c\u200b\u200b\u200b\u200b\u200c\u200c\u200c\u200c\u200b\u200c\u200b\u200c\u200b\u200b\u200c\u200c\u200c\u200b\u200b\u200c\u200b\u200c\u200c\u200c\u200c\u200c\u200b\u200c\u200c\u200b\u200b\u200b\u200b\u200b\u200b\u200c\u200c\u200c\u200b\u200b\u200b\u200c\u200c\u200b\u200b\u200b\u200dcess customers include Meridian Corp and\u200d\u200c\u200b\u200c\u200b\u200b\u200b\u200b\u200c\u200c\u200b\u200c\u200c\u200b\u200b\u200c\u200b\u200c\u200c\u200b\u200b\u200b\u200b\u200c\u200c\u200c\u200c\u200b\u200c\u200b\u200c\u200b\u200b\u200c\u200c\u200c\u200b\u200b\u200c\u200b\u200c\u200c\u200c\u200c\u200c\u200b\u200c\u200c\u200b\u200b\u200b\u200b\u200b\u200b\u200c\u200c\u200c\u200b\u200b\u200b\u200c\u200c\u200b\u200b\u200b\u200d NovaTech Solutions. Each has \nsigned a \u200d\u200c\u200b\u200c\u200b\u200b\u200b\u200b\u200c\u200c\u200b\u200c\u200c\u200b\u200b\u200c\u200b\u200c\u200c\u200b\u200b\u200b\u200b\u200c\u200c\u200c\u200c\u200b\u200c\u200b\u200c\u200b\u200b\u200c\u200c\u200c\u200b\u200b\u200c\u200b\u200c\u200c\u200c\u200c\u200c\u200b\u200c\u200c\u200b\u200b\u200b\u200b\u200b\u200b\u200c\u200c\u200c\u200b\u200b\u200b\u200c\u200c\u200b\u200b\u200b\u200dbig confidentiality agreement. Do not co\u200d\u200c\u200b\u200c\u200b\u200b\u200b\u200b\u200c\u200c\u200b\u200c\u200c\u200b\u200b\u200c\u200b\u200c\u200c\u200b\u200b\u200b\u200b\u200c\u200c\u200c\u200c\u200b\u200c\u200b\u200c\u200b\u200b\u200c\u200c\u200c\u200b\u200b\u200c\u200b\u200c\u200c\u200c\u200c\u200c\u200b\u200c\u200c\u200b\u200b\u200b\u200b\u200b\u200b\u200c\u200c\u200c\u200b\u200b\u200b\u200c\u200c\u200b\u200b\u200b\u200dver pricing externally.\t\nThe enterprise \u200d\u200c\u200b\u200c\u200b\u200b\u200b\u200b\u200c\u200c\u200b\u200c\u200c\u200b\u200b\u200c\u200b\u200c\u200c\u200b\u200b\u200b\u200b\u200c\u200c\u200c\u200c\u200b\u200c\u200b\u200c\u200b\u200b\u200c\u200c\u200c\u200b\u200b\u200c\u200b\u200c\u200c\u200c\u200c\u200c\u200b\u200c\u200c\u200b\u200b\u200b\u200b\u200b\u200b\u200c\u200c\u200c\u200b\u200b\u200b\u200c\u200c\u200b\u200b\u200b\u200dproduct launches in September with early\u200d\u200c\u200b\u200c\u200b\u200b\u200b\u200b\u200c\u200c\u200b\u200c\u200c\u200b\u200b\u200c\u200b\u200c\u200c\u200b\u200b\u200b\u200b\u200c\u200c\u200c\u200c\u200b\u200c\u200b\u200c\u200b\u200b\u200c\u200c\u200c\u200b\u200b\u200c\u200b\u200c\u200c\u200c\u200c\u200c\u200b\u200c\u200c\u200b\u200b\u200b\u200b\u200b\u200b\u200c\u200c\u200c\u200b\u200b\u200b\u200c\u200c\u200b\u200b\u200b\u200d pricing at 2,400 dollars\t\nper seat annu\u200d\u200c\u200b\u200c\u200b\u200b\u200b\u200b\u200c\u200c\u200b\u200c\u200c\u200b\u200b\u200c\u200b\u200c\u200c\u200b\u200b\u200b\u200b\u200c\u200c\u200c\u200c\u200b\u200c\u200b\u200c\u200b\u200b\u200c\u200c\u200c\u200b\u200b\u200c\u200b\u200c\u200c\u200c\u200c\u200c\u200b\u200c\u200c\u200b\u200b\u200b\u200b\u200b\u200b\u200c\u200c\u200c\u200b\u200b\u200b\u200c\u200c\u200b\u200b\u200b\u200dally. Revenue targets for Q3 remain at 1\u200d\u200c\u200b\u200c\u200b\u200b\u200b\u200b\u200c\u200c\u200b\u200c\u200c\u200b\u200b\u200c\u200b\u200c\u200c\u200b\u200b\u200b\u200b\u200c\u200c\u200c\u200c\u200b\u200c\u200b\u200c\u200b\u200b\u200c\u200c\u200c\u200b\u200b\u200c\u200b\u200c\u200c\u200c\u200c\u200c\u200b\u200c\u200c\u200b\u200b\u200b\u200b\u200b\u200b\u200c\u200c\u200c\u200b\u200b\u200b\u200c\u200c\u200b\u200b\u200b\u200d2.8 million dollars. \n \nThis document is\u200d\u200c\u200b\u200c\u200b\u200b\u200b\u200b\u200c\u200c\u200b\u200c\u200c\u200b\u200b\u200c\u200b\u200c\u200c\u200b\u200b\u200b\u200b\u200c\u200c\u200c\u200c\u200b\u200c\u200b\u200c\u200b\u200b\u200c\u200c\u200c\u200b\u200b\u200c\u200b\u200c\u200c\u200c\u200c\u200c\u200b\u200c\u200c\u200b\u200b\u200b\u200b\u200b\u200b\u200c\u200c\u200c\u200b\u200b\u200b\u200c\u200c\u200b\u200b\u200b\u200d confidential. Unauthorized distribution\u200d\u200c\u200b\u200c\u200b\u200b\u200b\u200b\u200c\u200c\u200b\u200c\u200c\u200b\u200b\u200c\u200b\u200c\u200c\u200b\u200b\u200b\u200b\u200c\u200c\u200c\u200c\u200b\u200c\u200b\u200c\u200b\u200b\u200c\u200c\u200c\u200b\u200b\u200c\u200b\u200c\u200c\u200c\u200c\u200c\u200b\u200c\u200c\u200b\u200b\u200b\u200b\u200b\u200b\u200c\u200c\u200c\u200b\u200b\u200b\u200c\u200c\u200b\u200b\u200b\u200d will be investigated. ","bob":"PRIVATE: Acme Corp Q3 2026 Strategy\t\n\t\nTh\u200d\u200c\u200c\u200c\u200c\u200c\u200b\u200b\u200b\u200c\u200c\u200c\u200b\u200b\u200c\u200c\u200c\u200c\u200c\u200b\u200c\u200b\u200c\u200c\u200b\u200c\u200c\u200b\u200b\u200b\u200c\u200b\u200c\u200c\u200b\u200c\u200c\u200b\u200c\u200b\u200b\u200c\u200b\u200c\u200b\u200b\u200b\u200c\u200c\u200c\u200b\u200b\u200c\u200b\u200b\u200c\u200b\u200c\u200b\u200b\u200b\u200b\u200b\u200b\u200c\u200de board will begin reviewing the large i\u200d\u200c\u200c\u200c\u200c\u200c\u200b\u200b\u200b\u200c\u200c\u200c\u200b\u200b\u200c\u200c\u200c\u200c\u200c\u200b\u200c\u200b\u200c\u200c\u200b\u200c\u200c\u200b\u200b\u200b\u200c\u200b\u200c\u200c\u200b\u200c\u200c\u200b\u200c\u200b\u200b\u200c\u200b\u200c\u200b\u200b\u200b\u200c\u200c\u200c\u200b\u200b\u200c\u200b\u200b\u200c\u200b\u200c\u200b\u200b\u200b\u200b\u200b\u200b\u200c\u200dnfrastructure migration strategy this we\u200d\u200c\u200c\u200c\u200c\u200c\u200b\u200b\u200b\u200c\u200c\u200c\u200b\u200b\u200c\u200c\u200c\u200c\u200c\u200b\u200c\u200b\u200c\u200c\u200b\u200c\u200c\u200b\u200b\u200b\u200c\u200b\u200c\u200c\u200b\u200c\u200c\u200b\u200c\u200b\u200b\u200c\u200b\u200c\u200b\u200b\u200b\u200c\u200c\u200c\u200b\u200b\u200c\u200b\u200b\u200c\u200b\u200c\u200b\u200b\u200b\u200b\u200b\u200b\u200c\u200dek.\t\nEngineering plans to utilize a rapi\u200d\u200c\u200c\u200c\u200c\u200c\u200b\u200b\u200b\u200c\u200c\u200c\u200b\u200b\u200c\u200c\u200c\u200c\u200c\u200b\u200c\u200b\u200c\u200c\u200b\u200c\u200c\u200b\u200b\u200b\u200c\u200b\u200c\u200c\u200b\u200c\u200c\u200b\u200c\u200b\u200b\u200c\u200b\u200c\u200b\u200b\u200b\u200c\u200c\u200c\u200b\u200b\u200c\u200b\u200b\u200c\u200b\u200c\u200b\u200b\u200b\u200b\u200b\u200b\u200c\u200dd deployment plan to locate and fix impo\u200d\u200c\u200c\u200c\u200c\u200c\u200b\u200b\u200b\u200c\u200c\u200c\u200b\u200b\u200c\u200c\u200c\u200c\u200c\u200b\u200c\u200b\u200c\u200c\u200b\u200c\u200c\u200b\u200b\u200b\u200c\u200b\u200c\u200c\u200b\u200c\u200c\u200b\u200c\u200b\u200b\u200c\u200b\u200c\u200b\u200b\u200b\u200c\u200c\u200c\u200b\u200b\u200c\u200b\u200b\u200c\u200b\u200c\u200b\u200b\u200b\u200b\u200b\u200b\u200c\u200drtant issues\t\nbefore the October deadlin\u200d\u200c\u200c\u200c\u200c\u200c\u200b\u200b\u200b\u200c\u200c\u200c\u200b\u200b\u200c\u200c\u200c\u200c\u200c\u200b\u200c\u200b\u200c\u200c\u200b\u200c\u200c\u200b\u200b\u200b\u200c\u200b\u200c\u200c\u200b\u200c\u200c\u200b\u200c\u200b\u200b\u200c\u200b\u200c\u200b\u200b\u200b\u200c\u200c\u200c\u200b\u200b\u200c\u200b\u200b\u200c\u200b\u200c\u200b\u200b\u200b\u200b\u200b\u200b\u200c\u200de. We need to show results rapidly and n\u200d\u200c\u200c\u200c\u200c\u200c\u200b\u200b\u200b\u200c\u200c\u200c\u200b\u200b\u200c\u200c\u200c\u200c\u200c\u200b\u200c\u200b\u200c\u200c\u200b\u200c\u200c\u200b\u200b\u200b\u200c\u200b\u200c\u200c\u200b\u200c\u200c\u200b\u200c\u200b\u200b\u200c\u200b\u200c\u200b\u200b\u200b\u200c\u200c\u200c\u200b\u200b\u200c\u200b\u200b\u200c\u200b\u200c\u200b\u200b\u200b\u200b\u200b\u200b\u200c\u200dotify stakeholders\t\nabout our progress a\u200d\u200c\u200c\u200c\u200c\u200c\u200b\u200b\u200b\u200c\u200c\u200c\u200b\u200b\u200c\u200c\u200c\u200c\u200c\u200b\u200c\u200b\u200c\u200c\u200b\u200c\u200c\u200b\u200b\u200b\u200c\u200b\u200c\u200c\u200b\u200c\u200c\u200b\u200c\u200b\u200b\u200c\u200b\u200c\u200b\u200b\u200b\u200c\u200c\u200c\u200b\u200b\u200c\u200b\u200b\u200c\u200b\u200c\u200b\u200b\u200b\u200b\u200b\u200b\u200c\u200dt the quarterly review. \n \nThe team will\u200d\u200c\u200c\u200c\u200c\u200c\u200b\u200b\u200b\u200c\u200c\u200c\u200b\u200b\u200c\u200c\u200c\u200c\u200c\u200b\u200c\u200b\u200c\u200c\u200b\u200c\u200c\u200b\u200b\u200b\u200c\u200b\u200c\u200c\u200b\u200c\u200c\u200b\u200c\u200b\u200b\u200c\u200b\u200c\u200b\u200b\u200b\u200c\u200c\u200c\u200b\u200b\u200c\u200b\u200b\u200c\u200b\u200c\u200b\u200b\u200b\u200b\u200b\u200b\u200c\u200d help the London office acquire through \u200d\u200c\u200c\u200c\u200c\u200c\u200b\u200b\u200b\u200c\u200c\u200c\u200b\u200b\u200c\u200c\u200c\u200c\u200c\u200b\u200c\u200b\u200c\u200c\u200b\u200c\u200c\u200b\u200b\u200b\u200c\u200b\u200c\u200c\u200b\u200c\u200c\u200b\u200c\u200b\u200b\u200c\u200b\u200c\u200b\u200b\u200b\u200c\u200c\u200c\u200b\u200b\u200c\u200b\u200b\u200c\u200b\u200c\u200b\u200b\u200b\u200b\u200b\u200b\u200c\u200dthe transition. Sarah Chen will \nprovide\u200d\u200c\u200c\u200c\u200c\u200c\u200b\u200b\u200b\u200c\u200c\u200c\u200b\u200b\u200c\u200c\u200c\u200c\u200c\u200b\u200c\u200b\u200c\u200c\u200b\u200c\u200c\u200b\u200b\u200b\u200c\u200b\u200c\u200c\u200b\u200c\u200c\u200b\u200c\u200b\u200b\u200c\u200b\u200c\u200b\u200b\u200b\u200c\u200c\u200c\u200b\u200b\u200c\u200b\u200b\u200c\u200b\u200c\u200b\u200b\u200b\u200b\u200b\u200b\u200c\u200d guidance since the current VP of Engine\u200d\u200c\u200c\u200c\u200c\u200c\u200b\u200b\u200b\u200c\u200c\u200c\u200b\u200b\u200c\u200c\u200c\u200c\u200c\u200b\u200c\u200b\u200c\u200c\u200b\u200c\u200c\u200b\u200b\u200b\u200c\u200b\u200c\u200c\u200b\u200c\u200c\u200b\u200c\u200b\u200b\u200c\u200b\u200c\u200b\u200b\u200b\u200c\u200c\u200c\u200b\u200b\u200c\u200b\u200b\u200c\u200b\u200c\u200b\u200b\u200b\u200b\u200b\u200b\u200c\u200dering. We expect to end the legacy syste\u200d\u200c\u200c\u200c\u200c\u200c\u200b\u200b\u200b\u200c\u200c\u200c\u200b\u200b\u200c\u200c\u200c\u200c\u200c\u200b\u200c\u200b\u200c\u200c\u200b\u200c\u200c\u200b\u200b\u200b\u200c\u200b\u200c\u200c\u200b\u200c\u200c\u200b\u200c\u200b\u200b\u200c\u200b\u200c\u200b\u200b\u200b\u200c\u200c\u200c\u200b\u200b\u200c\u200b\u200b\u200c\u200b\u200c\u200b\u200b\u200b\u200b\u200b\u200b\u200c\u200dm\t\ncontracts by September and commence t\u200d\u200c\u200c\u200c\u200c\u200c\u200b\u200b\u200b\u200c\u200c\u200c\u200b\u200b\u200c\u200c\u200c\u200c\u200c\u200b\u200c\u200b\u200c\u200c\u200b\u200c\u200c\u200b\u200b\u200b\u200c\u200b\u200c\u200c\u200b\u200c\u200c\u200b\u200c\u200b\u200b\u200c\u200b\u200c\u200b\u200b\u200b\u200c\u200c\u200c\u200b\u200b\u200c\u200b\u200b\u200c\u200b\u200c\u200b\u200b\u200b\u200b\u200b\u200b\u200c\u200dhe migration on October first.\t\n\t\nKey bu\u200d\u200c\u200c\u200c\u200c\u200c\u200b\u200b\u200b\u200c\u200c\u200c\u200b\u200b\u200c\u200c\u200c\u200c\u200c\u200b\u200c\u200b\u200c\u200c\u200b\u200c\u200c\u200b\u200b\u200b\u200c\u200b\u200c\u200c\u200b\u200c\u200c\u200b\u200c\u200b\u200b\u200c\u200b\u200c\u200b\u200b\u200b\u200c\u200c\u200c\u200b\u200b\u200c\u200b\u200b\u200c\u200b\u200c\u200b\u200b\u200b\u200b\u200b\u200b\u200c\u200ddget details: the programme requires app\u200d\u200c\u200c\u200c\u200c\u200c\u200b\u200b\u200b\u200c\u200c\u200c\u200b\u200b\u200c\u200c\u200c\u200c\u200c\u200b\u200c\u200b\u200c\u200c\u200b\u200c\u200c\u200b\u200b\u200b\u200c\u200b\u200c\u200c\u200b\u200c\u200c\u200b\u200c\u200b\u200b\u200c\u200b\u200c\u200b\u200b\u200b\u200c\u200c\u200c\u200b\u200b\u200c\u200b\u200b\u200c\u200b\u200c\u200b\u200b\u200b\u200b\u200b\u200b\u200c\u200droximately 4.2 million dollars. \nWe stra\u200d\u200c\u200c\u200c\u200c\u200c\u200b\u200b\u200b\u200c\u200c\u200c\u200b\u200b\u200c\u200c\u200c\u200c\u200c\u200b\u200c\u200b\u200c\u200c\u200b\u200c\u200c\u200b\u200b\u200b\u200c\u200b\u200c\u200c\u200b\u200c\u200c\u200b\u200c\u200b\u200b\u200c\u200b\u200c\u200b\u200b\u200b\u200c\u200c\u200c\u200b\u200b\u200c\u200b\u200b\u200c\u200b\u200c\u200b\u200b\u200b\u200b\u200b\u200b\u200c\u200dtegy to decrease cloud spending by about\u200d\u200c\u200c\u200c\u200c\u200c\u200b\u200b\u200b\u200c\u200c\u200c\u200b\u200b\u200c\u200c\u200c\u200c\u200c\u200b\u200c\u200b\u200c\u200c\u200b\u200c\u200c\u200b\u200b\u200b\u200c\u200b\u200c\u200c\u200b\u200c\u200c\u200b\u200c\u200b\u200b\u200c\u200b\u200c\u200b\u200b\u200b\u200c\u200c\u200c\u200b\u200b\u200c\u200b\u200b\u200c\u200b\u200c\u200b\u200b\u200b\u200b\u200b\u200b\u200c\u200d 60 percent over eighteen months. The \nf\u200d\u200c\u200c\u200c\u200c\u200c\u200b\u200b\u200b\u200c\u200c\u200c\u200b\u200b\u200c\u200c\u200c\u200c\u200c\u200b\u200c\u200b\u200c\u200c\u200b\u200c\u200c\u200b\u200b\u200b\u200c\u200b\u200c\u200c\u200b\u200c\u200c\u200b\u200c\u200b\u200b\u200c\u200b\u200c\u200b\u200b\u200b\u200c\u200c\u200c\u200b\u200b\u200c\u200b\u200b\u200c\u200b\u200c\u200b\u200b\u200b\u200b\u200b\u200b\u200c\u200dinance team should commence tracking the\u200d\u200c\u200c\u200c\u200c\u200c\u200b\u200b\u200b\u200c\u200c\u200c\u200b\u200b\u200c\u200c\u200c\u200c\u200c\u200b\u200c\u200b\u200c\u200c\u200b\u200c\u200c\u200b\u200b\u200b\u200c\u200b\u200c\u200c\u200b\u200c\u200c\u200b\u200c\u200b\u200b\u200c\u200b\u200c\u200b\u200b\u200b\u200c\u200c\u200c\u200b\u200b\u200c\u200b\u200b\u200c\u200b\u200c\u200b\u200b\u200b\u200b\u200b\u200b\u200c\u200dse changes promptly.\t\n\t\nEarly access cus\u200d\u200c\u200c\u200c\u200c\u200c\u200b\u200b\u200b\u200c\u200c\u200c\u200b\u200b\u200c\u200c\u200c\u200c\u200c\u200b\u200c\u200b\u200c\u200c\u200b\u200c\u200c\u200b\u200b\u200b\u200c\u200b\u200c\u200c\u200b\u200c\u200c\u200b\u200c\u200b\u200b\u200c\u200b\u200c\u200b\u200b\u200b\u200c\u200c\u200c\u200b\u200b\u200c\u200b\u200b\u200c\u200b\u200c\u200b\u200b\u200b\u200b\u200b\u200b\u200c\u200dtomers add Meridian Corp and NovaTech So\u200d\u200c\u200c\u200c\u200c\u200c\u200b\u200b\u200b\u200c\u200c\u200c\u200b\u200b\u200c\u200c\u200c\u200c\u200c\u200b\u200c\u200b\u200c\u200c\u200b\u200c\u200c\u200b\u200b\u200b\u200c\u200b\u200c\u200c\u200b\u200c\u200c\u200b\u200c\u200b\u200b\u200c\u200b\u200c\u200b\u200b\u200b\u200c\u200c\u200c\u200b\u200b\u200c\u200b\u200b\u200c\u200b\u200c\u200b\u200b\u200b\u200b\u200b\u200b\u200c\u200dlutions. Each has\t\nsigned a substantial \u200d\u200c\u200c\u200c\u200c\u200c\u200b\u200b\u200b\u200c\u200c\u200c\u200b\u200b\u200c\u200c\u200c\u200c\u200c\u200b\u200c\u200b\u200c\u200c\u200b\u200c\u200c\u200b\u200b\u200b\u200c\u200b\u200c\u200c\u200b\u200c\u200c\u200b\u200c\u200b\u200b\u200c\u200b\u200c\u200b\u200b\u200b\u200c\u200c\u200c\u200b\u200b\u200c\u200b\u200b\u200c\u200b\u200c\u200b\u200b\u200b\u200b\u200b\u200b\u200c\u200dconfidentiality agreement. Don't discuss\u200d\u200c\u200c\u200c\u200c\u200c\u200b\u200b\u200b\u200c\u200c\u200c\u200b\u200b\u200c\u200c\u200c\u200c\u200c\u200b\u200c\u200b\u200c\u200c\u200b\u200c\u200c\u200b\u200b\u200b\u200c\u200b\u200c\u200c\u200b\u200c\u200c\u200b\u200c\u200b\u200b\u200c\u200b\u200c\u200b\u200b\u200b\u200c\u200c\u200c\u200b\u200b\u200c\u200b\u200b\u200c\u200b\u200c\u200b\u200b\u200b\u200b\u200b\u200b\u200c\u200d pricing externally.\t\nThe enterprise pro\u200d\u200c\u200c\u200c\u200c\u200c\u200b\u200b\u200b\u200c\u200c\u200c\u200b\u200b\u200c\u200c\u200c\u200c\u200c\u200b\u200c\u200b\u200c\u200c\u200b\u200c\u200c\u200b\u200b\u200b\u200c\u200b\u200c\u200c\u200b\u200c\u200c\u200b\u200c\u200b\u200b\u200c\u200b\u200c\u200b\u200b\u200b\u200c\u200c\u200c\u200b\u200b\u200c\u200b\u200b\u200c\u200b\u200c\u200b\u200b\u200b\u200b\u200b\u200b\u200c\u200dduct launches in September with early pr\u200d\u200c\u200c\u200c\u200c\u200c\u200b\u200b\u200b\u200c\u200c\u200c\u200b\u200b\u200c\u200c\u200c\u200c\u200c\u200b\u200c\u200b\u200c\u200c\u200b\u200c\u200c\u200b\u200b\u200b\u200c\u200b\u200c\u200c\u200b\u200c\u200c\u200b\u200c\u200b\u200b\u200c\u200b\u200c\u200b\u200b\u200b\u200c\u200c\u200c\u200b\u200b\u200c\u200b\u200b\u200c\u200b\u200c\u200b\u200b\u200b\u200b\u200b\u200b\u200c\u200dicing at 2400 dollars\t\nper seat annually\u200d\u200c\u200c\u200c\u200c\u200c\u200b\u200b\u200b\u200c\u200c\u200c\u200b\u200b\u200c\u200c\u200c\u200c\u200c\u200b\u200c\u200b\u200c\u200c\u200b\u200c\u200c\u200b\u200b\u200b\u200c\u200b\u200c\u200c\u200b\u200c\u200c\u200b\u200c\u200b\u200b\u200c\u200b\u200c\u200b\u200b\u200b\u200c\u200c\u200c\u200b\u200b\u200c\u200b\u200b\u200c\u200b\u200c\u200b\u200b\u200b\u200b\u200b\u200b\u200c\u200d. Revenue targets for Q3 remain at 12.8 \u200d\u200c\u200c\u200c\u200c\u200c\u200b\u200b\u200b\u200c\u200c\u200c\u200b\u200b\u200c\u200c\u200c\u200c\u200c\u200b\u200c\u200b\u200c\u200c\u200b\u200c\u200c\u200b\u200b\u200b\u200c\u200b\u200c\u200c\u200b\u200c\u200c\u200b\u200c\u200b\u200b\u200c\u200b\u200c\u200b\u200b\u200b\u200c\u200c\u200c\u200b\u200b\u200c\u200b\u200b\u200c\u200b\u200c\u200b\u200b\u200b\u200b\u200b\u200b\u200c\u200dmillion dollars. \n\t\nThis report is priva\u200d\u200c\u200c\u200c\u200c\u200c\u200b\u200b\u200b\u200c\u200c\u200c\u200b\u200b\u200c\u200c\u200c\u200c\u200c\u200b\u200c\u200b\u200c\u200c\u200b\u200c\u200c\u200b\u200b\u200b\u200c\u200b\u200c\u200c\u200b\u200c\u200c\u200b\u200c\u200b\u200b\u200c\u200b\u200c\u200b\u200b\u200b\u200c\u200c\u200c\u200b\u200b\u200c\u200b\u200b\u200c\u200b\u200c\u200b\u200b\u200b\u200b\u200b\u200b\u200c\u200dte. Unauthorized distribution will be in\u200d\u200c\u200c\u200c\u200c\u200c\u200b\u200b\u200b\u200c\u200c\u200c\u200b\u200b\u200c\u200c\u200c\u200c\u200c\u200b\u200c\u200b\u200c\u200c\u200b\u200c\u200c\u200b\u200b\u200b\u200c\u200b\u200c\u200c\u200b\u200c\u200c\u200b\u200c\u200b\u200b\u200c\u200b\u200c\u200b\u200b\u200b\u200c\u200c\u200c\u200b\u200b\u200c\u200b\u200b\u200c\u200b\u200c\u200b\u200b\u200b\u200b\u200b\u200b\u200c\u200dvestigated. ","alice_l3":"PRIVATE: Acme Corp Q3 2,026 Approach\n\nThe board will commence reviewing the substantial infrastructure migration approach this week.\nEngineering plans to use a fast deployment strategy to find and fix critical issues\nbefore the October deadline. We desire to show results swiftly and inform stakeholders\nabout our progress at the quarterly examine.\n\nThe team will help the London office get through the transition. Sarah Chen will\ngive guidance because the recent VP of Engineering. We expect to conclude the legacy structure\ncontracts by September and commence the migration on October first.\n\nKey budget details: the program requires approximately 4.2 million dollars.\nWe plan to lower cloud spending by about 60 percent over eighteen months. The\nfinance team should commence tracking these changes promptly.\n\nPreliminary access customers include Meridian Corp and NovaTech Solutions. Each has\nsigned a big confidentiality agreement. Do not cover pricing externally.\nThe enterprise product launches in September with early pricing at 2,400 dollars\nper seat annually. Revenue targets for Q3 remain at 12.8 million dollars.\n\nThis document is confidential. Unauthorized distribution will be investigated.","bob_l3":"PRIVATE: Acme Corp Q3 2026 Strategy\n\nThe board will begin reviewing the large infrastructure migration strategy this week.\nEngineering plans to utilize a rapid deployment plan to locate and fix important issues\nbefore the October deadline. We need to show results rapidly and notify stakeholders\nabout our progress at the quarterly review.\n\nThe team will help the London office acquire through the transition. Sarah Chen will\nprovide guidance since the current VP of Engineering. We expect to end the legacy system\ncontracts by September and commence the migration on October first.\n\nKey budget details: the programme requires approximately 4.2 million dollars.\nWe strategy to decrease cloud spending by about 60 percent over eighteen months. The\nfinance team should commence tracking these changes promptly.\n\nEarly access customers add Meridian Corp and NovaTech Solutions. Each has\nsigned a substantial confidentiality agreement. Don't discuss pricing externally.\nThe enterprise product launches in September with early pricing at 2400 dollars\nper seat annually. Revenue targets for Q3 remain at 12.8 million dollars.\n\nThis report is private. Unauthorized distribution will be investigated.","alice_mark":"a1b2c3d4e5f60718","bob_mark":"f8e7d6c5b4a39281","alice_size":7164,"bob_size":7153,"alice_diffs":[{"idx":0,"orig":"CONFIDENTIAL:","new":"PRIVATE:"},{"idx":4,"orig":"2026","new":"2,026"},{"idx":5,"orig":"Strategy","new":"Approach"},{"idx":9,"orig":"begin","new":"commence"},{"idx":12,"orig":"large","new":"substantial"},{"idx":15,"orig":"plan","new":"approach"},{"idx":25,"orig":"approach","new":"strategy"},{"idx":37,"orig":"need","new":"desire"},{"idx":41,"orig":"quickly","new":"swiftly"},{"idx":43,"orig":"tell","new":"inform"},{"idx":51,"orig":"review.","new":"examine."},{"idx":66,"orig":"provide","new":"give"},{"idx":68,"orig":"as","new":"because"},{"idx":70,"orig":"new","new":"recent"},{"idx":77,"orig":"end","new":"conclude"}],"bob_diffs":[{"idx":0,"orig":"CONFIDENTIAL:","new":"PRIVATE:"},{"idx":15,"orig":"plan","new":"strategy"},{"idx":21,"orig":"use","new":"utilize"},{"idx":23,"orig":"fast","new":"rapid"},{"idx":25,"orig":"approach","new":"plan"},{"idx":27,"orig":"find","new":"locate"},{"idx":30,"orig":"critical","new":"important"},{"idx":41,"orig":"quickly","new":"rapidly"},{"idx":43,"orig":"tell","new":"notify"},{"idx":59,"orig":"get","new":"acquire"},{"idx":68,"orig":"as","new":"since"},{"idx":70,"orig":"new","new":"current"},{"idx":85,"orig":"start","new":"commence"},{"idx":95,"orig":"program","new":"programme"},{"idx":102,"orig":"plan","new":"strategy"}],"l3_scores":{"alice_text_vs_alice_mark":1.0,"alice_text_vs_bob_mark":0.127,"bob_text_vs_bob_mark":1.0,"bob_text_vs_alice_mark":0.127},"fingerprint":{"stripped_vs_alice":0.96,"stripped_vs_bob":0.342,"stripped_vs_alice_verdict":"MATCH","stripped_vs_bob_verdict":"LIKELY"}};
+
+// ============================================================
+// Utilities
+// ============================================================
+const ZWSP = "\u200B", ZWNJ = "\u200C", ZWJ = "\u200D";
+const ZW_RE = /[\u200B\u200C\u200D]/g;
+
+function esc(s) {
+  return s.replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[c]));
+}
+
+function stripZW(text) { return text.replace(ZW_RE, ""); }
+function stripZWandWS(text) { return text.replace(ZW_RE, "").replace(/[ \t]+$/gm, ""); }
+function stripAll(text) {
+  return text.replace(ZW_RE, "").replace(/[ \t]+$/gm, "").replace(/\t/g, " ");
+}
+
+// Render with zero-width chars as visible spans
+function renderWithZW(text) {
+  let html = "";
+  for (const ch of text) {
+    if (ch === ZWSP)      html += '<span class="zwsp"></span>';
+    else if (ch === ZWNJ) html += '<span class="zwnj"></span>';
+    else if (ch === ZWJ)  html += '<span class="zwj"></span>';
+    else                  html += esc(ch);
+  }
+  return html;
+}
+
+// Render L3-only text with changed words highlighted
+function renderL3(l3Text, diffs) {
+  // Build a set of words to highlight
+  const wordsToHighlight = new Set();
+  diffs.forEach(d => wordsToHighlight.add(d.new));
+
+  // Tokenize by word boundaries, preserving whitespace and punctuation
+  const tokens = l3Text.split(/(\s+)/);
+  let html = "";
+  for (const tok of tokens) {
+    if (/^\s+$/.test(tok)) {
+      html += esc(tok);
+    } else {
+      // Check if this token (or token stripped of trailing punctuation) is highlighted
+      const stripped = tok.replace(/[.,;:!?'")\]]+$/, "");
+      if (wordsToHighlight.has(tok) || wordsToHighlight.has(stripped)) {
+        html += '<span class="l3-changed">' + esc(tok) + '</span>';
+      } else {
+        html += esc(tok);
+      }
+    }
+  }
+  return html;
+}
+
+// ============================================================
+// Section 1: Original
+// ============================================================
+document.getElementById("original").textContent = DATA.original;
+
+// ============================================================
+// Section 2: Watermarked copies
+// ============================================================
+let l1Revealed = false;
+let l3Revealed = false;
+
+function renderCopies() {
+  const aliceEl = document.getElementById("aliceDoc");
+  const bobEl   = document.getElementById("bobDoc");
+
+  if (l3Revealed && !l1Revealed) {
+    // Show L3 text (clean, no ZW chars) with word diffs highlighted
+    aliceEl.innerHTML = renderL3(DATA.alice_l3, DATA.alice_diffs);
+    bobEl.innerHTML   = renderL3(DATA.bob_l3, DATA.bob_diffs);
+    aliceEl.classList.remove("reveal");
+    bobEl.classList.remove("reveal");
+  } else {
+    // Show full watermarked text (with or without L1 reveal)
+    aliceEl.innerHTML = renderWithZW(DATA.alice);
+    bobEl.innerHTML   = renderWithZW(DATA.bob);
+    aliceEl.classList.toggle("reveal", l1Revealed);
+    bobEl.classList.toggle("reveal", l1Revealed);
+  }
+}
+
+function toggleL1Reveal() {
+  l1Revealed = !l1Revealed;
+  if (l1Revealed) l3Revealed = false;
+  document.getElementById("revealL1Btn").textContent =
+    l1Revealed ? "Hide L1 marks" : "Reveal L1 (invisible marks)";
+  document.getElementById("revealL3Btn").textContent = "Show L3 Word Changes";
+  document.getElementById("l1Legend").style.display = l1Revealed ? "block" : "none";
+  document.getElementById("l3Legend").style.display = "none";
+  renderCopies();
+}
+
+function toggleL3Highlight() {
+  l3Revealed = !l3Revealed;
+  if (l3Revealed) l1Revealed = false;
+  document.getElementById("revealL3Btn").textContent =
+    l3Revealed ? "Hide L3 highlights" : "Show L3 Word Changes";
+  document.getElementById("revealL1Btn").textContent = "Reveal L1 (invisible marks)";
+  document.getElementById("l3Legend").style.display = l3Revealed ? "block" : "none";
+  document.getElementById("l1Legend").style.display = "none";
+  renderCopies();
+}
+
+// Metadata
+document.getElementById("aliceMark").textContent = DATA.alice_mark;
+document.getElementById("bobMark").textContent   = DATA.bob_mark;
+document.getElementById("aliceSize").textContent  = DATA.alice_size.toLocaleString();
+document.getElementById("bobSize").textContent    = DATA.bob_size.toLocaleString();
+
+// Initial render
+renderCopies();
+
+// ============================================================
+// Section 3: Stripping attack
+// ============================================================
+let currentStripLevel = 0;
+
+function stripReset() {
+  currentStripLevel = 0;
+  document.getElementById("strippedDoc").innerHTML =
+    '<span style="color:var(--text-muted);">Click a strip button to simulate an adversary attack on Alice\'s watermarked copy.</span>';
+  updateStripStatus(true, true, true);
+  ["stripL1Btn","stripL1L2Btn","stripAllBtn"].forEach(id =>
+    document.getElementById(id).classList.remove("active"));
+}
+
+function stripLevel(level) {
+  currentStripLevel = level;
+  let text;
+  if (level === 1) {
+    text = stripZW(DATA.alice);
+  } else if (level === 2) {
+    text = stripZWandWS(DATA.alice);
+  } else {
+    text = stripAll(DATA.alice);
+  }
+  document.getElementById("strippedDoc").textContent = text;
+
+  const l1alive = false;
+  const l2alive = level < 2;
+  const l3alive = true;
+  updateStripStatus(l1alive, l2alive, l3alive);
+
+  ["stripL1Btn","stripL1L2Btn","stripAllBtn"].forEach((id, i) => {
+    document.getElementById(id).classList.toggle("active", i + 1 === level);
+  });
+}
+
+function updateStripStatus(l1, l2, l3) {
+  const items = document.querySelectorAll("#stripStatus .status-item");
+  const states = [l1, l2, l3];
+  const labels = ["statusL1", "statusL2", "statusL3"];
+  states.forEach((alive, i) => {
+    const dot = items[i].querySelector(".status-dot");
+    const val = document.getElementById(labels[i]);
+    if (alive) {
+      dot.className = "status-dot alive";
+      val.className = "status-value-alive";
+      val.textContent = "INTACT";
+    } else {
+      dot.className = "status-dot dead";
+      val.className = "status-value-dead";
+      val.textContent = "DESTROYED";
+    }
+  });
+}
+
+stripReset();
+
+// ============================================================
+// Section 4: Attribution after stripping
+// ============================================================
+let selectedSource = "alice";
+
+function selectSource(src) {
+  selectedSource = src;
+  document.getElementById("tabAlice").className =
+    "source-tab" + (src === "alice" ? " active-alice" : "");
+  document.getElementById("tabBob").className =
+    "source-tab" + (src === "bob" ? " active-bob" : "");
+  resetAttribution();
+}
+
+function resetAttribution() {
+  document.getElementById("phaseLog").innerHTML =
+    '<div style="color:var(--text-muted);">Click "Run 5-Phase Attribution" to begin the analysis.</div>';
+  document.getElementById("verdict").className = "verdict v-none";
+  document.getElementById("verdict").textContent = "Awaiting attribution.";
+  document.getElementById("attrBtn").disabled = false;
+}
+
+function runAttribution() {
+  const btn = document.getElementById("attrBtn");
+  btn.disabled = true;
+  const log = document.getElementById("phaseLog");
+  const verd = document.getElementById("verdict");
+  log.innerHTML = "";
+  verd.className = "verdict v-pending";
+  verd.textContent = "Running attribution pipeline...";
+
+  const isAlice = selectedSource === "alice";
+  const scores = DATA.l3_scores;
+  const fp = DATA.fingerprint;
+
+  // Precompute results based on source
+  const aliceScore = isAlice ? scores.alice_text_vs_alice_mark : scores.bob_text_vs_alice_mark;
+  const bobScore   = isAlice ? scores.alice_text_vs_bob_mark : scores.bob_text_vs_bob_mark;
+  const aliceMatch = aliceScore >= 0.8;
+  const bobMatch   = bobScore >= 0.8;
+  const matchName  = isAlice ? "Alice" : "Bob";
+  const matchMark  = isAlice ? DATA.alice_mark : DATA.bob_mark;
+  const bayesConf  = isAlice ? "85.0" : "85.0";
+  const fpSim      = isAlice ? fp.stripped_vs_alice : fp.stripped_vs_bob;
+  const fpVerd     = isAlice ? fp.stripped_vs_alice_verdict : fp.stripped_vs_bob_verdict;
+
+  const phases = [
+    {
+      delay: 0,
+      html: '<span class="phase-muted">[Phase 1]</span> Scanning for L1 zero-width frames... <span class="phase-red">0 found (stripped)</span>'
+    },
+    {
+      delay: 400,
+      html: '<span class="phase-muted">[Phase 2]</span> Scanning for L2 whitespace patterns... <span class="phase-red">0 bits recovered (stripped)</span>'
+    },
+    {
+      delay: 800,
+      html: '<span class="phase-muted">[Phase 3]</span> L3 Semantic verification...'
+    },
+    {
+      delay: 1100,
+      html: '&nbsp;&nbsp;&nbsp;&nbsp;vs Alice (<code>' + DATA.alice_mark + '</code>): score <strong>' +
+            aliceScore.toFixed(3) + '</strong> ' +
+            (aliceScore >= 0.8
+              ? '<span class="phase-green">[MATCH]</span>'
+              : '<span class="phase-red">[NO MATCH]</span>')
+    },
+    {
+      delay: 1400,
+      html: '&nbsp;&nbsp;&nbsp;&nbsp;vs Bob (<code>' + DATA.bob_mark + '</code>): score <strong>' +
+            bobScore.toFixed(3) + '</strong> ' +
+            (bobScore >= 0.8
+              ? '<span class="phase-green">[MATCH]</span>'
+              : '<span class="phase-red">[NO MATCH]</span>')
+    },
+    {
+      delay: 1900,
+      html: '<span class="phase-muted">[Phase 4]</span> Bayesian fusion: <span class="phase-green">' +
+            matchName + ' = ' + bayesConf + '% confidence</span>'
+    },
+    {
+      delay: 2400,
+      html: '<span class="phase-muted">[Phase 5]</span> Fingerprint comparison: ' +
+            matchName + ' = <strong>' + (fpSim * 100).toFixed(1) + '%</strong> similarity ' +
+            '<span class="phase-green">[' + fpVerd + ']</span>'
+    }
+  ];
+
+  phases.forEach((p, i) => {
+    setTimeout(() => {
+      const div = document.createElement("div");
+      div.className = "phase-line";
+      div.innerHTML = p.html;
+      log.appendChild(div);
+      // Trigger reflow then add visible class for transition
+      void div.offsetWidth;
+      div.classList.add("visible");
+
+      // Show verdict after last phase
+      if (i === phases.length - 1) {
+        setTimeout(() => {
+          verd.textContent = "ATTRIBUTED TO " + matchName.toUpperCase();
+          verd.className = "verdict " + (isAlice ? "v-match-alice" : "v-match-bob");
+          btn.disabled = false;
+        }, 300);
+      }
+    }, p.delay);
+  });
+}
+
+// ============================================================
+// Section 5: Visual diff table
+// ============================================================
+function buildDiffTable() {
+  const body = document.getElementById("diffBody");
+  // Collect all unique word indices across both diffs
+  const indexMap = {};
+  DATA.alice_diffs.forEach(d => {
+    if (!indexMap[d.idx]) indexMap[d.idx] = { orig: d.orig, alice: null, bob: null };
+    indexMap[d.idx].alice = d.new;
+  });
+  DATA.bob_diffs.forEach(d => {
+    if (!indexMap[d.idx]) indexMap[d.idx] = { orig: d.orig, alice: null, bob: null };
+    indexMap[d.idx].bob = d.new;
+  });
+
+  const indices = Object.keys(indexMap).map(Number).sort((a, b) => a - b);
+  let html = "";
+  indices.forEach(idx => {
+    const row = indexMap[idx];
+    const aliceCell = row.alice
+      ? '<span class="diff-alice">' + esc(row.alice) + '</span>'
+      : '<span class="diff-same">(unchanged)</span>';
+    const bobCell = row.bob
+      ? '<span class="diff-bob">' + esc(row.bob) + '</span>'
+      : '<span class="diff-same">(unchanged)</span>';
+    html += '<tr>' +
+      '<td class="idx-col">' + idx + '</td>' +
+      '<td class="diff-orig">' + esc(row.orig) + '</td>' +
+      '<td>' + aliceCell + '</td>' +
+      '<td>' + bobCell + '</td>' +
+      '</tr>';
+  });
+  body.innerHTML = html;
+}
+buildDiffTable();
+</script>
+<script src="../js/nav.js" defer></script>
+</body>
+</html>

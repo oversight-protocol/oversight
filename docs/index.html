@@ -1,0 +1,194 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Documentation | Oversight Protocol</title>
+  <meta name="description" content="Technical reference documentation for the Oversight protocol, including the specification, architecture, API, and CLI.">
+  <meta name="author" content="Zion Boggan">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="../css/style.css">
+</head>
+<body>
+
+<nav class="site-nav">
+  <div class="nav-inner">
+    <a href="../" class="nav-brand"><span>Oversight</span> Protocol</a>
+    <ul class="nav-links">
+      <li><a href="../">Home</a></li>
+      <li><a href="../demo/">Demo</a></li>
+      <li><a href="../viewer/">Inspect</a></li>
+      <li><a href="../docs/" class="active">Docs</a></li>
+      <li><a href="../research/">Research</a></li>
+      <li><a href="../blog/">Blog</a></li>
+      <li><a href="../about.html">About</a></li>
+    </ul>
+  </div>
+</nav>
+
+<main>
+  <div class="container">
+    <div class="page-header">
+      <h1>Documentation</h1>
+      <p class="subtitle">Technical reference for the Oversight protocol and its implementations</p>
+    </div>
+
+    <p>
+      The protocol specification is the authoritative source for wire-format details, algorithm
+      selection, and conformance requirements. Architecture and API docs cover implementation
+      details for anyone working with the Oversight libraries.
+    </p>
+
+    <div class="card-grid">
+
+      <a href="https://github.com/oversight-protocol/oversight/blob/main/docs/SPEC.md" class="card" style="text-decoration:none;color:inherit;">
+        <h3>Protocol Specification <span class="badge badge-blue">External</span></h3>
+        <p style="color:var(--text-secondary);">
+          The canonical protocol specification. Defines the container format, algorithm suites,
+          watermarking layers, policy schema, transparency log data structures, and conformance
+          requirements. This is the primary reference for implementors.
+        </p>
+      </a>
+
+      <a href="architecture.html" class="card" style="text-decoration:none;color:inherit;">
+        <h3>Architecture Overview <span class="badge badge-green">New</span></h3>
+        <p style="color:var(--text-secondary);">
+          High-level architecture document covering the seal/open pipeline, crate structure (Rust),
+          module layout (Python), and the interaction between the client library, CLI, and registry
+          server. Includes component tables and cross-language conformance details.
+        </p>
+      </a>
+
+      <a href="https://github.com/oversight-protocol/oversight/blob/main/docs/security.md" class="card" style="text-decoration:none;color:inherit;">
+        <h3>Security Notes <span class="badge badge-green">New</span> <span class="badge badge-blue">External</span></h3>
+        <p style="color:var(--text-secondary);">
+          Honest threat-model companion to the spec. Watermark layer survival matrix, L3
+          semantic watermark safety and document-class defaults, collusion and canonicalization
+          limits, passive beacons as telemetry rather than guarantees, jurisdiction-by-IP as
+          soft policy, and what RFC 3161 timestamps prove.
+        </p>
+      </a>
+
+      <a href="https://github.com/oversight-protocol/oversight/blob/main/docs/spec/registry-v1.md" class="card" style="text-decoration:none;color:inherit;">
+        <h3>Registry v1 Spec <span class="badge badge-green">New</span> <span class="badge badge-blue">External</span></h3>
+        <p style="color:var(--text-secondary);">
+          Registry federation and interoperability specification. Covers the HTTP surface a
+          second operator must implement to run a compatible registry, the signed-manifest
+          handshake, sidecar validation, and the fields needed for cross-operator attribution.
+        </p>
+      </a>
+
+      <a href="roadmap.html" class="card" style="text-decoration:none;color:inherit;">
+        <h3>Roadmap <span class="badge badge-green">Updated</span></h3>
+        <p style="color:var(--text-secondary);">
+          Launch plan gated on product usability and threat-model honesty. L3 safety shipped
+          in v0.4.5; next milestones are the web viewer, Outlook add-in, a regulated-industry
+          design partner, SOC 2 Type 1 scoping, and a public launch only after a non-technical
+          user experience exists. FedRAMP dropped from near-term planning.
+        </p>
+      </a>
+
+      <a href="https://github.com/oversight-protocol/oversight/blob/main/docs/HARDWARE_KEYS.md" class="card" style="text-decoration:none;color:inherit;">
+        <h3>Hardware Keys Guide <span class="badge badge-blue">External</span></h3>
+        <p style="color:var(--text-secondary);">
+          Instructions for storing Oversight signing and decryption keys on hardware tokens (YubiKey,
+          Nitrokey). Covers PKCS#11 integration, key generation on-device, and operational security
+          recommendations.
+        </p>
+      </a>
+
+      <a href="api-reference.html" class="card" style="text-decoration:none;color:inherit;">
+        <h3>API Reference <span class="badge badge-green">New</span></h3>
+        <p style="color:var(--text-secondary);">
+          Python API documentation for <code>oversight_core</code>. Covers seal/open, watermark
+          embedding and recovery, semantic marks, content fingerprinting, ECC, manifest
+          construction, and cryptographic primitives with full function signatures.
+        </p>
+      </a>
+
+      <a href="cli-reference.html" class="card" style="text-decoration:none;color:inherit;">
+        <h3>CLI Reference <span class="badge badge-green">New</span></h3>
+        <p style="color:var(--text-secondary);">
+          Full reference for the <code>oversight</code> command-line tool. Documents all
+          subcommands (keygen, seal, open, inspect, attribute), their flags, watermark behavior,
+          and the five-phase forensic attribution pipeline with example workflows.
+        </p>
+      </a>
+
+      <a href="gui.html" class="card" style="text-decoration:none;color:inherit;">
+        <h3>GUI Guide <span class="badge badge-green">New</span></h3>
+        <p style="color:var(--text-secondary);">
+          Installation, launch, and walk-through of the v0.4.5 Tkinter desktop starter
+          (<code>oversight gui</code>). Covers the three tabs (Generate Keys, Seal File,
+          Open File), the L3 disclosure prompt, the files the seal path writes, private-key
+          hardening on POSIX, troubleshooting, and implementation notes.
+        </p>
+      </a>
+
+      <a href="watermark-resilience.html" class="card" style="text-decoration:none;color:inherit;">
+        <h3>Watermark Resilience Analysis <span class="badge badge-green">New</span></h3>
+        <p style="color:var(--text-secondary);">
+          Technical analysis of watermark resilience against stripping attacks. Covers the attack
+          taxonomy, per-layer survival, ECC protection, content fingerprinting, information-theoretic
+          capacity bounds, the No Free Lunch theorem, and honest limitations.
+        </p>
+      </a>
+
+      <a href="performance.html" class="card" style="text-decoration:none;color:inherit;">
+        <h3>Performance Evaluation <span class="badge badge-green">New</span></h3>
+        <p style="color:var(--text-secondary);">
+          Performance characteristics of the Oversight pipeline. Covers seal/open throughput,
+          watermark embedding overhead, file size impact, fingerprint computation cost,
+          Python vs Rust comparison, and registry query latency.
+        </p>
+      </a>
+
+      <a href="https://github.com/oversight-protocol/oversight/blob/main/docs/SIEM.md" class="card" style="text-decoration:none;color:inherit;">
+        <h3>SIEM Integration <span class="badge badge-green">New</span> <span class="badge badge-blue">External</span></h3>
+        <p style="color:var(--text-secondary);">
+          Export Oversight beacon events to Splunk HEC, Microsoft Sentinel, or
+          an Elastic Common Schema stack. Covers the <code>oversight siem export</code>
+          CLI, the event field dictionary, the Sentinel HMAC signing recipe, and the
+          honest beacon-absence caveat that every dashboard needs to respect.
+        </p>
+      </a>
+
+      <a href="../viewer/" class="card" style="text-decoration:none;color:inherit;">
+        <h3>Sealed File Inspector <span class="badge badge-green">New</span></h3>
+        <p style="color:var(--text-secondary);">
+          Drag-drop a <code>.sealed</code> file to parse the container, verify the
+          issuer's Ed25519 signature in the browser via WebCrypto, and see the
+          manifest, watermarks, beacons, and policy. Optional registry lookup for
+          recipients who want a provenance confirmation. Nothing leaves your
+          device unless you click a registry button.
+        </p>
+      </a>
+
+      <a href="../mobile/" class="card" style="text-decoration:none;color:inherit;">
+        <h3>Mobile Verifier <span class="badge badge-green">New</span></h3>
+        <p style="color:var(--text-secondary);">
+          The Flutter and Rust mobile verifier shares the desktop CLI's verification
+          core via <code>flutter_rust_bridge</code>, so a manifest that opens on a
+          laptop opens the same way on a phone. Status, architecture, the
+          reproducible-builds plan, and how to track the TestFlight and Android
+          beta. Source on GitHub at <code>oversight-protocol/oversight-mobile</code>.
+        </p>
+      </a>
+
+    </div>
+  </div>
+</main>
+
+<footer class="site-footer">
+  <div class="container">
+    <p>Oversight Protocol &copy; 2026 Zion Boggan. Apache 2.0 License.</p>
+    <p style="color:var(--text-muted);font-size:13px;">Co-authored with Claude Opus 4.6 and 4.7 (Anthropic).</p>
+    <p><a href="https://github.com/oversight-protocol/oversight">GitHub</a></p>
+  </div>
+</footer>
+
+<script src="../js/nav.js" defer></script>
+</body>
+</html>

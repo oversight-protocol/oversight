@@ -1,0 +1,573 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Sealed File Inspector | Oversight Protocol</title>
+  <meta name="description" content="Drop an Oversight .sealed file to inspect its manifest, verify the issuer's Ed25519 signature in the browser, and optionally resolve provenance against the declared registry. Nothing leaves your device unless you ask it to.">
+  <meta name="author" content="Zion Boggan">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="../css/style.css">
+  <style>
+    .drop-area {
+      border: 2px dashed var(--border);
+      border-radius: 12px;
+      padding: 48px 24px;
+      text-align: center;
+      transition: border-color 0.15s, background 0.15s;
+      cursor: pointer;
+      margin: 24px 0;
+    }
+    .drop-area.dragover {
+      border-color: var(--accent-blue);
+      background: rgba(64, 128, 255, 0.05);
+    }
+    .drop-area .hint {
+      color: var(--text-muted);
+      font-size: 14px;
+      margin-top: 8px;
+    }
+    .verify-badge {
+      display: inline-block;
+      padding: 4px 10px;
+      border-radius: 4px;
+      font-weight: 600;
+      font-size: 13px;
+      letter-spacing: 0.02em;
+    }
+    .verify-badge.ok { background: rgba(60, 180, 100, 0.12); color: #5ad19a; }
+    .verify-badge.bad { background: rgba(220, 80, 80, 0.15); color: #ff8080; }
+    .verify-badge.pending { background: rgba(180, 180, 180, 0.12); color: var(--text-secondary); }
+    .kv-table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 14px;
+      margin: 16px 0;
+    }
+    .kv-table th, .kv-table td {
+      text-align: left;
+      padding: 8px 12px;
+      border-bottom: 1px solid var(--border);
+      vertical-align: top;
+    }
+    .kv-table th {
+      color: var(--text-muted);
+      font-weight: 500;
+      width: 220px;
+      white-space: nowrap;
+    }
+    .kv-table td { color: var(--text-primary); word-break: break-all; }
+    .kv-table code { font-size: 13px; }
+    .section-heading { margin-top: 32px; }
+    .error-box {
+      background: rgba(220, 80, 80, 0.08);
+      border: 1px solid rgba(220, 80, 80, 0.3);
+      color: #ffb0b0;
+      padding: 12px 16px;
+      border-radius: 6px;
+      font-size: 14px;
+      margin: 16px 0;
+    }
+    .info-box {
+      background: rgba(64, 128, 255, 0.06);
+      border: 1px solid rgba(64, 128, 255, 0.25);
+      color: var(--text-secondary);
+      padding: 12px 16px;
+      border-radius: 6px;
+      font-size: 14px;
+      margin: 16px 0;
+    }
+    .registry-actions { margin-top: 12px; display: flex; gap: 8px; flex-wrap: wrap; }
+    details { margin: 8px 0; }
+    details summary { cursor: pointer; color: var(--text-secondary); font-size: 14px; }
+    details pre {
+      background: var(--bg-secondary);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 12px;
+      overflow-x: auto;
+      font-size: 12px;
+      color: var(--text-secondary);
+    }
+  </style>
+</head>
+<body>
+
+<nav class="site-nav">
+  <div class="nav-inner">
+    <a href="../" class="nav-brand"><span>Oversight</span> Protocol</a>
+    <ul class="nav-links">
+      <li><a href="../">Home</a></li>
+      <li><a href="../demo/">Demo</a></li>
+      <li><a href="../viewer/" class="active">Inspect</a></li>
+      <li><a href="../docs/">Docs</a></li>
+      <li><a href="../research/">Research</a></li>
+      <li><a href="../blog/">Blog</a></li>
+      <li><a href="../about.html">About</a></li>
+    </ul>
+  </div>
+</nav>
+
+<main>
+  <div class="container">
+    <div class="page-header">
+      <h1>Sealed File Inspector</h1>
+      <p class="subtitle">Drop a <code>.sealed</code> file to verify the issuer signature and inspect the manifest. No upload.</p>
+    </div>
+
+    <div class="info-box">
+      Inspection runs entirely in your browser. The file is parsed locally, the
+      Ed25519 signature is verified via the WebCrypto API, and nothing leaves
+      your device unless you explicitly click a registry lookup button below. A
+      modern browser is required: Safari 17 or later, Chrome 113 or later, or
+      Firefox 130 or later.
+    </div>
+
+    <div id="drop" class="drop-area" tabindex="0" role="button" aria-label="Drop a sealed file here or click to choose one">
+      <div style="font-size:18px;color:var(--text-primary);font-weight:600;">
+        Drop a <code>.sealed</code> file here
+      </div>
+      <div class="hint">or click to choose one from your device</div>
+      <input id="file-input" type="file" accept=".sealed,application/octet-stream" style="display:none;">
+    </div>
+
+    <p style="color:var(--text-secondary);font-size:14px;margin-top:-8px;">
+      Don't have a sealed file? Try one of these samples:
+      <a href="samples/hello-alice.sealed" download>hello-alice.sealed</a>
+      (valid signature, not decryptable),
+      <a href="samples/hello-alice-tampered.sealed" download>hello-alice-tampered.sealed</a>
+      (signature invalid),
+      <a href="samples/tutorial.sealed" download>tutorial.sealed</a>
+      (decryptable with the tutorial identity).
+      Drop any of them into the inspector above.
+    </p>
+
+    <div id="error" class="error-box" style="display:none;"></div>
+
+    <section id="results" style="display:none;">
+      <h2 class="section-heading">Verification</h2>
+      <p>
+        Signature status:
+        <span id="verify-badge" class="verify-badge pending">checking...</span>
+      </p>
+      <p id="verify-detail" style="color:var(--text-secondary);font-size:14px;"></p>
+
+      <h2 class="section-heading">Container</h2>
+      <table class="kv-table" id="container-table"></table>
+
+      <h2 class="section-heading">Manifest</h2>
+      <table class="kv-table" id="manifest-table"></table>
+
+      <h2 class="section-heading">Watermarks</h2>
+      <table class="kv-table" id="watermark-table"></table>
+
+      <h2 class="section-heading">Beacons</h2>
+      <table class="kv-table" id="beacon-table"></table>
+
+      <h2 class="section-heading">Policy</h2>
+      <table class="kv-table" id="policy-table"></table>
+
+      <h2 class="section-heading">Decrypt in browser</h2>
+      <p style="color:var(--text-secondary);font-size:14px;">
+        Paste or upload the recipient <code>identity.json</code> (as produced by
+        <code>oversight keygen</code>). The X25519 private key stays in memory;
+        decryption runs locally using WebCrypto for key agreement and a vendored
+        copy of <code>@noble/ciphers</code> for XChaCha20-Poly1305. Hybrid
+        (post-quantum) sealed files are on the roadmap and will not decrypt here
+        yet.
+      </p>
+      <div class="registry-actions" style="flex-direction:column;align-items:stretch;gap:8px;">
+        <input id="identity-file" type="file" accept=".json,application/json" style="color:var(--text-secondary);">
+        <textarea id="identity-text" rows="4" placeholder='Or paste identity JSON: {"x25519_priv":"...","x25519_pub":"..."}'
+          style="width:100%;background:var(--bg-secondary);border:1px solid var(--border);color:var(--text-primary);border-radius:6px;padding:10px;font-family:var(--font-mono);font-size:12px;"></textarea>
+        <div style="display:flex;gap:8px;">
+          <button id="btn-decrypt" class="btn btn-primary" type="button">Decrypt</button>
+          <button id="btn-try-tutorial" class="btn btn-secondary" type="button">Load tutorial identity</button>
+          <button id="btn-download-plaintext" class="btn btn-secondary" type="button" disabled>Download plaintext</button>
+        </div>
+      </div>
+      <div id="decrypt-output"></div>
+
+      <h2 class="section-heading">Registry lookup</h2>
+      <p style="color:var(--text-secondary);font-size:14px;">
+        The manifest declares a registry at
+        <code id="registry-url-display">(none)</code>. Clicking a button below
+        will send a request to that URL. This discloses to the registry operator
+        that someone is inspecting this <code>file_id</code>.
+      </p>
+      <div class="registry-actions">
+        <button id="btn-wellknown" class="btn btn-secondary" type="button">Fetch registry identity</button>
+        <button id="btn-evidence" class="btn btn-secondary" type="button">Fetch evidence bundle</button>
+      </div>
+      <div id="registry-output"></div>
+
+      <details style="margin-top:24px;">
+        <summary>Full manifest JSON</summary>
+        <pre id="raw-manifest"></pre>
+      </details>
+    </section>
+  </div>
+</main>
+
+<footer class="site-footer">
+  <div class="container">
+    <p>Oversight Protocol &copy; 2026 Zion Boggan. Apache 2.0 License.</p>
+    <p style="color:var(--text-muted);font-size:13px;">Co-authored with Claude Opus 4.6 and 4.7 (Anthropic).</p>
+    <p><a href="https://github.com/oversight-protocol/oversight">GitHub</a></p>
+  </div>
+</footer>
+
+<script type="module">
+import { parseSealed, verifyManifestSignature, sha256Hex, decryptSealed } from './viewer.js';
+import { xchacha20poly1305 } from './vendor/noble-ciphers-chacha-1.3.0.js';
+
+const drop = document.getElementById('drop');
+const fileInput = document.getElementById('file-input');
+const errorBox = document.getElementById('error');
+const results = document.getElementById('results');
+let lastManifest = null;
+let lastRegistryUrl = null;
+
+function esc(s) {
+  return String(s == null ? '' : s)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+}
+
+function showError(msg) {
+  errorBox.style.display = 'block';
+  errorBox.textContent = msg;
+  results.style.display = 'none';
+}
+
+function clearError() {
+  errorBox.style.display = 'none';
+  errorBox.textContent = '';
+}
+
+function renderKV(tableId, rows) {
+  const el = document.getElementById(tableId);
+  if (!rows.length) {
+    el.innerHTML = '<tr><td style="color:var(--text-muted);">(none)</td></tr>';
+    return;
+  }
+  el.innerHTML = rows
+    .map(([k, v]) => `<tr><th>${esc(k)}</th><td>${v}</td></tr>`)
+    .join('');
+}
+
+function codeCell(s) {
+  return `<code>${esc(s)}</code>`;
+}
+
+function truncateHex(h, keep = 16) {
+  if (!h || typeof h !== 'string' || h.length <= keep * 2 + 3) return esc(h || '');
+  return `<code>${esc(h.slice(0, keep))}…${esc(h.slice(-keep))}</code>`;
+}
+
+function absoluteRegistry(url) {
+  try {
+    const u = new URL(url);
+    if (u.protocol !== 'http:' && u.protocol !== 'https:') return null;
+    return u.origin + u.pathname.replace(/\/$/, '');
+  } catch (_) {
+    return null;
+  }
+}
+
+async function handleFile(file) {
+  clearError();
+  try {
+    const buf = await file.arrayBuffer();
+    const parsed = parseSealed(buf);
+    lastManifest = parsed.manifest;
+    lastParsed = parsed;
+    lastPlaintext = null;
+    const dlBtn = document.getElementById('btn-download-plaintext');
+    if (dlBtn) dlBtn.disabled = true;
+    const decOut = document.getElementById('decrypt-output');
+    if (decOut) decOut.innerHTML = '';
+
+    renderKV('container-table', [
+      ['File name', codeCell(file.name)],
+      ['File size', esc(parsed.totalSize.toLocaleString()) + ' bytes'],
+      ['Format version', esc(parsed.formatVersion)],
+      ['Cipher suite', esc(parsed.suiteName)],
+      ['Manifest size', esc(parsed.manifestBytes.length.toLocaleString()) + ' bytes'],
+      ['AEAD nonce', codeCell([...parsed.aeadNonce].map(b => b.toString(16).padStart(2, '0')).join(''))],
+      ['Ciphertext size', esc(parsed.ciphertextLen.toLocaleString()) + ' bytes'],
+    ]);
+
+    const m = parsed.manifest;
+    const policy = m.policy || {};
+    const recipient = m.recipient || {};
+    lastRegistryUrl = absoluteRegistry(policy.registry_url || '');
+
+    renderKV('manifest-table', [
+      ['file_id', codeCell(m.file_id)],
+      ['version', codeCell(m.version)],
+      ['suite', codeCell(m.suite)],
+      ['original_filename', codeCell(m.original_filename || '(unset)')],
+      ['content_type', codeCell(m.content_type)],
+      ['size_bytes', esc((m.size_bytes ?? '').toString())],
+      ['issued_at', esc(m.issued_at ? new Date(m.issued_at * 1000).toISOString() : '')],
+      ['issuer_id', codeCell(m.issuer_id)],
+      ['issuer_ed25519_pub', truncateHex(m.issuer_ed25519_pub)],
+      ['recipient.recipient_id', codeCell(recipient.recipient_id || '(none)')],
+      ['recipient.x25519_pub', truncateHex(recipient.x25519_pub || '')],
+      ['content_hash (SHA-256)', truncateHex(m.content_hash)],
+      ['canonical_content_hash', truncateHex(m.canonical_content_hash || '')],
+    ]);
+
+    renderKV(
+      'watermark-table',
+      (m.watermarks || []).map((w, i) => [
+        `#${i + 1}`,
+        `<code>${esc(w.layer)}</code> &middot; ${truncateHex(w.mark_id)}`,
+      ])
+    );
+
+    renderKV(
+      'beacon-table',
+      (m.beacons || []).map((b, i) => [
+        `#${i + 1}`,
+        `<code>${esc(b.kind || '')}</code> &middot; ${truncateHex(b.token_id)}`,
+      ])
+    );
+
+    const policyRows = Object.entries(policy).map(([k, v]) => [k, codeCell(v)]);
+    if (m.l3_policy && Object.keys(m.l3_policy).length) {
+      policyRows.push([
+        'l3_policy',
+        `<pre style="margin:0;padding:8px 12px;background:var(--bg-secondary);border:1px solid var(--border);border-radius:6px;font-size:12px;color:var(--text-secondary);overflow-x:auto;">${esc(JSON.stringify(m.l3_policy, null, 2))}</pre>`,
+      ]);
+    }
+    renderKV('policy-table', policyRows);
+
+    document.getElementById('registry-url-display').textContent =
+      lastRegistryUrl || '(not declared by the manifest)';
+    document.getElementById('btn-wellknown').disabled = !lastRegistryUrl;
+    document.getElementById('btn-evidence').disabled = !lastRegistryUrl;
+
+    document.getElementById('raw-manifest').textContent = JSON.stringify(m, null, 2);
+
+    results.style.display = 'block';
+
+    // Verify signature asynchronously and update the badge.
+    const badge = document.getElementById('verify-badge');
+    const detail = document.getElementById('verify-detail');
+    badge.textContent = 'verifying...';
+    badge.className = 'verify-badge pending';
+    const v = await verifyManifestSignature(m);
+    if (v.ok) {
+      badge.textContent = 'Signature valid';
+      badge.className = 'verify-badge ok';
+      detail.textContent =
+        'The manifest Ed25519 signature verifies against the embedded issuer public key. '
+        + 'This proves the manifest has not been altered since the issuer signed it.';
+    } else {
+      badge.textContent = 'Signature invalid';
+      badge.className = 'verify-badge bad';
+      detail.textContent = v.reason || 'The signature did not verify.';
+    }
+  } catch (e) {
+    showError('Could not inspect file: ' + (e && e.message ? e.message : e));
+  }
+}
+
+// Drag/drop + click wiring
+drop.addEventListener('click', () => fileInput.click());
+drop.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); fileInput.click(); }
+});
+fileInput.addEventListener('change', (e) => {
+  const f = e.target.files && e.target.files[0];
+  if (f) handleFile(f);
+});
+['dragenter', 'dragover'].forEach((evt) =>
+  drop.addEventListener(evt, (e) => { e.preventDefault(); drop.classList.add('dragover'); })
+);
+['dragleave', 'drop'].forEach((evt) =>
+  drop.addEventListener(evt, (e) => { e.preventDefault(); drop.classList.remove('dragover'); })
+);
+drop.addEventListener('drop', (e) => {
+  e.preventDefault();
+  const f = e.dataTransfer.files && e.dataTransfer.files[0];
+  if (f) handleFile(f);
+});
+
+function appendRegistryOutput(title, body, friendly) {
+  const container = document.getElementById('registry-output');
+  const wrap = document.createElement('details');
+  wrap.open = true;
+  const summary = document.createElement('summary');
+  summary.textContent = title;
+  wrap.appendChild(summary);
+  if (friendly) {
+    const note = document.createElement('p');
+    note.textContent = friendly;
+    note.style.color = 'var(--text-secondary)';
+    note.style.fontSize = '13px';
+    note.style.margin = '6px 0';
+    wrap.appendChild(note);
+  }
+  const pre = document.createElement('pre');
+  pre.textContent = body;
+  wrap.appendChild(pre);
+  container.appendChild(wrap);
+}
+
+async function fetchRegistry(path, context) {
+  if (!lastRegistryUrl) return;
+  const url = lastRegistryUrl + path;
+  try {
+    const resp = await fetch(url, { headers: { Accept: 'application/json' } });
+    const text = await resp.text();
+    let pretty = text;
+    let parsed = null;
+    try { parsed = JSON.parse(text); pretty = JSON.stringify(parsed, null, 2); } catch (_) {}
+    let friendly = '';
+    if (resp.status === 404 && context === 'evidence') {
+      friendly = 'This file_id is not registered with the declared registry. '
+        + 'That is expected for the tutorial samples; real sealed files normally '
+        + 'register their manifest with the registry at seal time.';
+    } else if (resp.status >= 500) {
+      friendly = 'The registry returned a server error. Try again or contact the operator.';
+    } else if (resp.status === 401 || resp.status === 403) {
+      friendly = 'The registry refused this request. This endpoint may require auth.';
+    }
+    appendRegistryOutput(`GET ${url}  (HTTP ${resp.status})`, pretty, friendly);
+  } catch (e) {
+    appendRegistryOutput(
+      `GET ${url}  (network error)`,
+      String(e && e.message ? e.message : e),
+      'The browser was unable to reach the registry. Common causes: CORS '
+      + 'not enabled by the operator, the registry is offline, or your network '
+      + 'blocks the hostname.'
+    );
+  }
+}
+
+document.getElementById('btn-wellknown').addEventListener('click', () => {
+  fetchRegistry('/.well-known/oversight-registry', 'well-known');
+});
+document.getElementById('btn-evidence').addEventListener('click', () => {
+  if (!lastManifest || !lastManifest.file_id) return;
+  const fid = encodeURIComponent(lastManifest.file_id);
+  fetchRegistry('/evidence/' + fid, 'evidence');
+});
+
+// ---- Decrypt wiring ----
+
+let lastParsed = null;
+let lastPlaintext = null;
+
+function setDecryptOutput(kind, message, body) {
+  const out = document.getElementById('decrypt-output');
+  out.innerHTML = '';
+  const box = document.createElement('div');
+  box.className = kind === 'error' ? 'error-box' : 'info-box';
+  box.textContent = message;
+  out.appendChild(box);
+  if (body) {
+    const pre = document.createElement('pre');
+    pre.style.cssText = 'background:var(--bg-secondary);border:1px solid var(--border);border-radius:6px;padding:12px;overflow-x:auto;font-size:12px;color:var(--text-primary);white-space:pre-wrap;word-break:break-word;max-height:400px;';
+    pre.textContent = body;
+    out.appendChild(pre);
+  }
+}
+
+function readIdentity() {
+  const raw = document.getElementById('identity-text').value.trim();
+  if (!raw) return null;
+  try {
+    return JSON.parse(raw);
+  } catch (e) {
+    throw new Error('identity JSON could not be parsed: ' + e.message);
+  }
+}
+
+document.getElementById('identity-file').addEventListener('change', async (e) => {
+  const f = e.target.files && e.target.files[0];
+  if (!f) return;
+  try {
+    const text = await f.text();
+    JSON.parse(text); // validate early
+    document.getElementById('identity-text').value = text;
+  } catch (err) {
+    setDecryptOutput('error', 'Could not read identity file: ' + err.message);
+  }
+});
+
+document.getElementById('btn-try-tutorial').addEventListener('click', async () => {
+  try {
+    const resp = await fetch('samples/tutorial-identity.json');
+    const text = await resp.text();
+    document.getElementById('identity-text').value = text;
+    setDecryptOutput('info', 'Tutorial identity loaded. This is a PUBLIC demo key. Do not use it for real content. Drop tutorial.sealed into the inspector to try the full decrypt flow.');
+  } catch (e) {
+    setDecryptOutput('error', 'Could not fetch tutorial identity: ' + e.message);
+  }
+});
+
+document.getElementById('btn-decrypt').addEventListener('click', async () => {
+  const dlBtn = document.getElementById('btn-download-plaintext');
+  dlBtn.disabled = true;
+  lastPlaintext = null;
+
+  if (!lastParsed) {
+    setDecryptOutput('error', 'Load a sealed file first.');
+    return;
+  }
+  let identity;
+  try {
+    identity = readIdentity();
+  } catch (e) {
+    setDecryptOutput('error', e.message);
+    return;
+  }
+  if (!identity) {
+    setDecryptOutput('error', 'Paste or upload an identity JSON, or click "Load tutorial identity".');
+    return;
+  }
+
+  try {
+    const plaintext = await decryptSealed(lastParsed, identity, xchacha20poly1305);
+    lastPlaintext = plaintext;
+    dlBtn.disabled = false;
+    let preview;
+    try {
+      preview = new TextDecoder('utf-8', { fatal: true }).decode(plaintext);
+    } catch (_) {
+      preview = `(binary, ${plaintext.length} bytes; use the Download button to save it)`;
+    }
+    setDecryptOutput(
+      'info',
+      `Decrypted ${plaintext.length} bytes. The plaintext SHA-256 matches the manifest content_hash.`,
+      preview
+    );
+  } catch (e) {
+    setDecryptOutput('error', e.message || String(e));
+  }
+});
+
+document.getElementById('btn-download-plaintext').addEventListener('click', () => {
+  if (!lastPlaintext || !lastParsed) return;
+  const blob = new Blob([lastPlaintext], { type: lastParsed.manifest.content_type || 'application/octet-stream' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = lastParsed.manifest.original_filename || 'plaintext.bin';
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(a.href);
+});
+</script>
+
+<script src="../js/nav.js" defer></script>
+</body>
+</html>

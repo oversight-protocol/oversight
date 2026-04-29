@@ -1,0 +1,98 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Building Oversight: Why I Wrote an Open Protocol for Data Provenance</title>
+  <meta name="description" content="The motivation behind Oversight Protocol: an open, vendor-neutral approach to cryptographic data provenance and leak attribution.">
+  <meta name="author" content="Zion Boggan">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="../css/style.css">
+</head>
+<body>
+
+<nav class="site-nav">
+  <div class="nav-inner">
+    <a href="../" class="nav-brand"><span>Oversight</span> Protocol</a>
+    <ul class="nav-links">
+      <li><a href="../">Home</a></li>
+      <li><a href="../demo/">Demo</a></li>
+      <li><a href="../viewer/">Inspect</a></li>
+      <li><a href="../docs/">Docs</a></li>
+      <li><a href="../research/">Research</a></li>
+      <li><a href="../blog/" class="active">Blog</a></li>
+      <li><a href="../about.html">About</a></li>
+    </ul>
+  </div>
+</nav>
+
+<main>
+
+  <div class="container">
+    <div class="blog-post-header">
+      <h1>Building Oversight: Why I Wrote an Open Protocol for Data Provenance</h1>
+      <div class="blog-post-meta">March 15, 2026 &middot; Zion Boggan &middot; ~6 min read</div>
+    </div>
+
+    <div class="blog-content">
+
+      <p>I spent years watching public data breaches unfold and reading the post-mortems. Confidential documents surfacing in places they should never have been. Incident reports forwarded to journalists, internal threat assessments posted on forums, strategy decks showing up in competitor filings. Every time, the same question: who leaked it? And every time, the same answer: we don't know, because nothing in the document tied it to a specific recipient. The metadata was stripped, the file was re-saved, and any provenance chain that might have existed was gone.</p>
+
+      <p>This is the problem Oversight was built to solve. Not access control (that's a different fight), but attribution after the fact. If a document reaches an unauthorized party, the sender should be able to determine which authorized recipient was the source. That's a narrow, specific goal, and I wanted a protocol that did exactly that without requiring trust in any vendor, cloud service, or proprietary runtime.</p>
+
+      <h2>What Already Exists (and Why It Falls Short)</h2>
+
+      <p>The obvious first candidate is DRM. Microsoft's Azure Information Protection, Adobe's document restrictions, Apple's Managed Open In. These systems work, in the narrow sense that they prevent casual copying. But they are vendor-locked by design. AIP requires Azure AD. Adobe's restrictions require Acrobat. If your threat model includes a motivated insider with a screenshot tool or a camera, DRM is theater. More importantly, DRM is an access control mechanism, not an attribution mechanism. It tries to prevent leaks rather than trace them.</p>
+
+      <p>The second candidate is C2PA, the Coalition for Content Provenance and Authenticity. C2PA does address provenance, and I respect the engineering behind it. But C2PA was designed for media authenticity (proving a photo is real), not for document leak attribution. Its trust model relies on a certificate authority hierarchy and cloud-based validation services. It embeds provenance metadata in the file, which means a knowledgeable adversary can strip it. There is no watermarking layer that survives reformatting or retyping. For the use case I care about, C2PA solves adjacent problems but not the core one.</p>
+
+      <p>The third option is simple metadata tagging, things like custom PDF properties or EXIF fields identifying the recipient. This is trivially defeated by any tool that strips metadata, which is most of them. A recipient who intends to leak a document will run it through a sanitizer first. Metadata-only provenance is security by obscurity with zero depth.</p>
+
+      <h2>The Design Principles</h2>
+
+      <p>I set four constraints before writing any code. First, no custom cryptography. Every cryptographic primitive in Oversight is a well-studied, widely-implemented standard. Key agreement uses X25519 (RFC 7748). Authenticated encryption uses XChaCha20-Poly1305. Signatures use Ed25519 (RFC 8032). The post-quantum extensions use ML-KEM-768 and ML-DSA-65 from NIST FIPS 203 and 204. I am not a cryptographer, and anyone who rolls their own cipher suite in a security protocol is advertising that they shouldn't be trusted with the task.</p>
+
+      <p>Second, no vendor lock-in. Oversight is Apache 2.0 licensed. The sealed container format is documented, the manifest schema is canonical JSON, and every operation can be performed offline with open-source tooling. There is no call-home, no license server, no cloud dependency. A sealed file produced today should be verifiable in ten years by anyone with the recipient's private key and a copy of the spec.</p>
+
+      <p>Third, no code execution on the reader's side. Some watermarking schemes rely on JavaScript in PDFs, macros in Office documents, or active content that phones home. I rejected this entirely. Oversight's watermarks are passive, embedded in the text content itself through Unicode manipulation, whitespace patterns, and synonym selection. Beacons are optional and operate at the network layer (DNS lookups, HTTP pixels), not through document-level scripting. A sealed document is inert data.</p>
+
+      <p>Fourth, open source from day one. Security protocols that depend on obscurity for their guarantees are not security protocols. The watermark layers, the encryption scheme, the container format: all of it is public. The security comes from the cryptographic binding between the watermark payload and the recipient's key, not from keeping the algorithm secret.</p>
+
+      <h2>The Sealed Container</h2>
+
+      <p>The core artifact in Oversight is the <code>.sealed</code> file. It's a structured container that bundles everything needed to verify provenance and decrypt the document. The outer layer is a canonical JSON manifest containing the sender's public key, the recipient's public key fingerprint, a content hash, an RFC 3161 timestamp token, a Merkle tree inclusion proof from the transparency log, and the policy constraints (time windows, open counts, jurisdiction). Inside the manifest sits the encrypted payload: the watermarked document encrypted with a per-seal symmetric key derived via HKDF-SHA256 from the X25519 shared secret.</p>
+
+      <p>The manifest is signed by the sender using Ed25519 (or, in hybrid mode, Ed25519 + ML-DSA-65). This signature covers the entire manifest including the content hash, so any tampering with the ciphertext, the policy, or the metadata invalidates the seal. The recipient verifies the signature, checks the inclusion proof against the transparency log's signed tree head, validates the RFC 3161 timestamp, enforces the policy, and only then decrypts.</p>
+
+      <p>I chose canonical JSON for the manifest rather than a binary format like CBOR or Protobuf because human readability matters for auditability. When a forensic analyst is examining a sealed file during an incident response, they should be able to read the manifest with <code>cat</code> and <code>jq</code>, not a specialized decoder. The performance cost is negligible for the document sizes Oversight targets.</p>
+
+      <h2>The Reference Implementation</h2>
+
+      <p>The initial implementation is in Python, using PyNaCl for the X25519/XChaCha20-Poly1305/Ed25519 primitives and liboqs-python for the post-quantum extensions. Python was the right choice for a reference implementation because readability matters more than performance at this stage. The seal and open operations on a typical 50-page document take under 200 milliseconds on commodity hardware; cryptographic throughput is not the bottleneck.</p>
+
+      <p>The Python SDK lives in <code>oversight/core/</code> with the watermarking engine in <code>oversight/watermark/</code>, the crypto layer in <code>oversight/crypto/</code>, and the transparency log in <code>oversight/tlog/</code>. The test suite has 34 Python-side tests covering the full pipeline: seal, open, watermark embed, watermark extract, cross-recipient verification failure, policy enforcement, and timestamp validation. I've since built a parallel Rust implementation (covered in a later post) with an additional 42 tests, bringing the total to 76 across both languages.</p>
+
+      <h2>Where This Is Going</h2>
+
+      <p>The immediate goal is a formal write-up targeting USENIX Security 2027. The protocol is novel enough in its combination of recipient-bound encryption with multi-layer watermarking and transparency logging that I believe it merits peer review. I want the cryptographic community to find the holes before anyone depends on this for real operational security.</p>
+
+      <p>Longer term, I want a Trail of Bits audit of both the Python and Rust implementations. That's expensive, but it's the standard I hold other security tooling to, and Oversight should meet the same bar. Until that audit happens, I'm clear in the documentation: this is research-grade software, not production-hardened infrastructure. Use it to understand the ideas. Don't use it to protect state secrets. Not yet.</p>
+
+    </div>
+  </div>
+
+</main>
+
+<footer class="site-footer">
+  <div class="container">
+    <p>Oversight Protocol &copy; 2026 Zion Boggan. Apache 2.0 License.</p>
+    <p style="color:var(--text-muted);font-size:13px;">Co-authored with Claude Opus 4.6 and 4.7 (Anthropic).</p>
+    <p><a href="https://github.com/oversight-protocol/oversight">GitHub</a></p>
+  </div>
+</footer>
+
+<script src="../js/nav.js" defer></script>
+</body>
+</html>

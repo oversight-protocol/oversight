@@ -1,0 +1,205 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Threat Model: Layer Survival, Collusion, Beacons, and Timestamp Trust | Oversight Protocol</title>
+  <meta name="description" content="Honest threat-model companion to the Oversight protocol specification. Per-layer watermark survival matrix, the L3 collusion and canonicalization attack, passive beacons as telemetry rather than guarantees, jurisdiction-by-IP as soft policy, and what RFC 3161 timestamps actually prove.">
+  <meta name="author" content="Zion Boggan">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="../css/style.css">
+</head>
+<body>
+
+<nav class="site-nav">
+  <div class="nav-inner">
+    <a href="../" class="nav-brand"><span>Oversight</span> Protocol</a>
+    <ul class="nav-links">
+      <li><a href="../">Home</a></li>
+      <li><a href="../demo/">Demo</a></li>
+      <li><a href="../viewer/">Inspect</a></li>
+      <li><a href="../docs/">Docs</a></li>
+      <li><a href="../research/" class="active">Research</a></li>
+      <li><a href="../blog/">Blog</a></li>
+      <li><a href="../about.html">About</a></li>
+    </ul>
+  </div>
+</nav>
+
+<main>
+  <div class="container">
+    <div class="page-header">
+      <h1>Threat Model: Layer Survival, Collusion, Beacons, and Timestamp Trust</h1>
+      <p class="subtitle">Honest companion to the Oversight protocol specification</p>
+    </div>
+
+    <p style="color:var(--text-muted);font-size:14px;">
+      Zion Boggan &middot; April 2026 &middot; Oversight Protocol v0.4.7
+    </p>
+
+    <h2 id="intent">Intent of this document</h2>
+    <p>
+      This page is the threat-model companion to the Oversight specification and mirrors the
+      language in <code>docs/security.md</code>. The point is to state, in public, what Oversight
+      does and does not defend against, so that issuers, recipients, and reviewers can reason
+      about the protocol honestly. RFC 2119 and BCP 14 keywords ("MUST", "SHOULD", "MAY") are
+      interpreted only when written in all capitals.
+    </p>
+
+    <h2 id="survival">1. Watermark layer survival matrix</h2>
+    <p>
+      Oversight's three watermark layers target different attack classes. Each survives different
+      transformations, and each degrades when pushed past its intended envelope. The matrix below
+      is the condensed version of the table in <code>docs/security.md</code>.
+    </p>
+
+    <div style="overflow-x:auto;">
+      <table>
+        <thead>
+          <tr>
+            <th>Layer</th>
+            <th>Screenshot</th>
+            <th>Reformat</th>
+            <th>Manual retype</th>
+            <th>Motivated adversary with vocabulary</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>L1 zero-width</td>
+            <td>No</td>
+            <td>Often no</td>
+            <td>No</td>
+            <td>No</td>
+          </tr>
+          <tr>
+            <td>L2 whitespace</td>
+            <td>No</td>
+            <td>No</td>
+            <td>No</td>
+            <td>No</td>
+          </tr>
+          <tr>
+            <td>L3 semantic</td>
+            <td>Yes</td>
+            <td>Yes</td>
+            <td>Often yes</td>
+            <td>No; canonicalization can defeat it</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <p>
+      L1 and L2 are steganographic convenience layers. They are useful forensic signals but
+      fragile under normalization: a copy-paste through an editor that strips non-printable
+      Unicode will take L1 out, and any save-on-normalize tool will take L2 out. L3 is stronger
+      because it encodes recipient identity in visible prose choices, but that strength is bought
+      at a cost: the recipient copy is textually non-identical to the canonical source. v0.4.5's
+      L3 policy forces that cost to be an explicit decision at seal time, not a silent default.
+    </p>
+
+    <h2 id="collusion">2. The L3 collusion and canonicalization attack</h2>
+    <p>
+      L3's synonym choices are deterministic per mark ID. If multiple recipients collude and
+      compare their copies, they can identify the positions where their texts diverge and
+      reconstruct the controlled vocabulary at those positions. Once the vocabulary is known,
+      they can canonicalize it: replace every variant with a single canonical choice before
+      leaking. The leaked text still carries the original semantic content, but the L3
+      attribution signal is destroyed.
+    </p>
+    <p>
+      This is not a bug. It is a property of deterministic semantic watermarking in the presence
+      of an <em>N</em>-party collusion oracle, and no protocol-layer change to L3 alone can
+      escape it. Mitigations under evaluation include per-recipient vocabulary randomization,
+      stronger candidate scoring that models collusion edits, and warnings or thresholds for
+      large recipient sets before L3 is enabled. Until those land, issuers should treat L3 as
+      attribution evidence against ordinary leaks and low-to-medium-effort stripping, not as a
+      perfect collusion-resistant watermark.
+    </p>
+    <p>
+      The manifest's <code>canonical_content_hash</code> and <code>l3_policy</code> fields,
+      added in v0.4.5, do not defeat collusion. They preserve the evidentiary trail: a later
+      investigation can verify which L3 mode was in force at seal time, whether the recipient
+      acknowledged the non-identity disclosure, and what canonical source bytes the sealed
+      copy derived from.
+    </p>
+
+    <h2 id="beacons">3. Passive beacons are telemetry, not guarantees</h2>
+    <p>
+      Oversight supports passive beacons that fire callbacks when a sealed document is opened
+      in an environment with network egress. A beacon is a forensic signal, not a detection
+      guarantee. Absence of a beacon does not prove absence of a leak. Corporate egress
+      filtering, air-gapped readers, privacy tools, sandboxed previews, and offline workflows
+      can all suppress callbacks. Any deployment that treats beacon silence as "the document
+      was not opened" is building a policy on an assumption the protocol does not support.
+    </p>
+
+    <h2 id="jurisdiction">4. Jurisdiction-by-IP is a soft policy control</h2>
+    <p>
+      Jurisdiction-by-IP is a useful operational signal for audit trails, routing decisions,
+      and honest-client policy enforcement. It is not a cryptographic security boundary. VPNs,
+      corporate NATs, residential proxies, and IP geolocation errors can all defeat or blur
+      the control. An issuer who wants to prevent opens from a particular jurisdiction with
+      cryptographic certainty has to enforce it through key custody and revocation, not
+      through IP-based policy.
+    </p>
+
+    <h2 id="rfc3161">5. What RFC 3161 timestamps actually prove</h2>
+    <p>
+      An RFC 3161 qualified timestamp proves that a particular datum existed at or before the
+      TSA's signing time. It does not prove authorship, ownership, or the content of the
+      underlying document beyond the hash that was submitted. The Time Stamp Authority remains
+      a trust anchor: its clock, its private key, and its operational integrity determine the
+      strength of the attestation. Oversight's Sigstore Rekor v2 integration reduces reliance
+      on any single TSA by anchoring evidence in a public append-only log, but transparency
+      logging does not eliminate timestamp trust; it distributes it across a wider set of
+      auditors.
+    </p>
+    <p>
+      For evidentiary purposes, the combination is stronger than either control alone: the
+      RFC 3161 chain documents an "exists-before" bound, the Rekor entry documents
+      "appended to a public log at checkpoint X," and the signed manifest links both to the
+      specific recipient and content hash. An auditor who trusts any <em>one</em> of these
+      anchors plus Oversight's cryptographic construction can verify the claim without having
+      to trust Oversight as an operator.
+    </p>
+
+    <h2 id="scope">6. What this threat model does not claim</h2>
+    <p>
+      Oversight does not claim to defeat all adversaries. Specifically:
+    </p>
+    <ul>
+      <li>A motivated adversary with a large language model, enough time, and willingness to paraphrase sentence-by-sentence will destroy every watermark layer. This follows directly from Shannon channel capacity at a crossover probability of 0.5.</li>
+      <li>A recipient with root access on their own machine can always decrypt documents they legitimately received; protection beyond that requires hardware-backed key custody, which is a planned feature rather than a shipped one.</li>
+      <li>Registry revocation depends on recipients' clients reaching the registry. <code>REGISTRY</code> mode fails closed on unreachable registries; <code>HYBRID</code> mode uses bounded local staleness as a cache. Neither mode can revoke a document from a client that refuses to check.</li>
+      <li>Beacons, geolocation, and open-count limits are defense-in-depth controls, not root-of-trust controls. They raise the cost of misuse; they do not guarantee its absence.</li>
+    </ul>
+
+    <h2 id="references">7. References</h2>
+    <ul>
+      <li>RFC 2119 / BCP 14 requirement keyword handling: <a href="https://datatracker.ietf.org/doc/html/rfc2119">datatracker.ietf.org/doc/html/rfc2119</a></li>
+      <li>RFC 8174 clarification of RFC 2119 keyword scope.</li>
+      <li>RFC 3161 Time-Stamp Protocol.</li>
+      <li>ETSI EN 319 421 for qualified timestamping operational requirements.</li>
+      <li>Sigstore Rekor v2 protocol reference.</li>
+      <li>OpenAPI latest specification for registry interoperability: <a href="https://spec.openapis.org/oas/latest">spec.openapis.org/oas/latest</a></li>
+      <li>Companion document: <a href="https://github.com/oversight-protocol/oversight/blob/main/docs/security.md">docs/security.md</a> in the Oversight repository.</li>
+    </ul>
+
+  </div>
+</main>
+
+<footer class="site-footer">
+  <div class="container">
+    <p>Oversight Protocol &copy; 2026 Zion Boggan. Apache 2.0 License.</p>
+    <p style="color:var(--text-muted);font-size:13px;">Co-authored with Claude Opus 4.6 and 4.7 (Anthropic).</p>
+    <p><a href="https://github.com/oversight-protocol/oversight">GitHub</a></p>
+  </div>
+</footer>
+
+<script src="../js/nav.js" defer></script>
+</body>
+</html>

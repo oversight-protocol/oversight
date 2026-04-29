@@ -1,0 +1,152 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>v0.4.6: SIEM Export for Splunk, Sentinel, and Elastic | Oversight Protocol</title>
+  <meta name="description" content="Why Oversight v0.4.6 ships pure formatters for Splunk HEC, Microsoft Sentinel Log Analytics, and Elastic Common Schema, and what it takes to get beacon callbacks into a live incident pipeline.">
+  <meta name="author" content="Zion Boggan">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="../css/style.css">
+</head>
+<body>
+
+<nav class="site-nav">
+  <div class="nav-inner">
+    <a href="../" class="nav-brand"><span>Oversight</span> Protocol</a>
+    <ul class="nav-links">
+      <li><a href="../">Home</a></li>
+      <li><a href="../demo/">Demo</a></li>
+      <li><a href="../viewer/">Inspect</a></li>
+      <li><a href="../docs/">Docs</a></li>
+      <li><a href="../research/">Research</a></li>
+      <li><a href="../blog/" class="active">Blog</a></li>
+      <li><a href="../about.html">About</a></li>
+    </ul>
+  </div>
+</nav>
+
+<main>
+  <div class="container">
+
+    <div class="blog-post-header">
+      <h1>v0.4.6: SIEM Export for Splunk, Sentinel, and Elastic</h1>
+      <div class="blog-post-meta">2026-04-22 &middot; Zion Boggan &middot; ~6 min read</div>
+    </div>
+
+    <div class="blog-content">
+
+      <p>
+        The roadmap lists SIEM integration ahead of SOC 2 because enterprise evaluators
+        only take provenance telemetry seriously once it lands in the same pane of glass
+        as the rest of their incident data. A beacon callback that lives in a vendor
+        sidecar is evidence nobody reads. v0.4.6 ships what that integration actually
+        requires: a normalized event model, three schema-stable formatters, and a CLI
+        that reads the registry database without taking a write lock.
+      </p>
+
+      <h2>One model, three shapes</h2>
+
+      <p>
+        The registry's <code>events</code> table already records every beacon callback
+        with the fields a SIEM cares about: kind (<code>dns</code>, <code>http_img</code>,
+        <code>ocsp</code>, <code>license</code>), source IP, user agent, the
+        issuer/recipient/file triplet, and the local transparency-log index. The new
+        <code>oversight_core.siem</code> module lifts a row into an <code>OversightEvent</code>
+        dataclass and hands it to one of three formatters. <code>to_splunk_hec()</code>
+        returns a Splunk HEC envelope with <code>time</code> as epoch seconds and a
+        <code>fields</code> block that indexed extractions can key off. <code>to_ecs()</code>
+        returns an Elastic Common Schema 8.x document, with <code>event.dataset</code>
+        set to <code>oversight.beacon</code> so the Elastic Security app renders the
+        events without custom mappings. <code>to_sentinel()</code> returns a flat
+        record ready for the Log Analytics Data Collector API, where nested fields
+        become dynamic columns that KQL has to dereference at query time.
+      </p>
+
+      <p>
+        Formatters are pure. They do not perform network I/O, they do not open the
+        database, and they do not invent fields that are not in the source row. Every
+        optional field is dropped from the output when the source value is empty
+        rather than emitted as <code>null</code>, because SIEM dashboards that treat
+        <code>null</code> as a legitimate value will produce bad alerts on quiet
+        registries.
+      </p>
+
+      <h2>Transport is a thin sink layer</h2>
+
+      <p>
+        I do not want Oversight carrying SIEM credentials by default. Splunk HEC tokens,
+        Sentinel shared keys, and Elastic API keys are the kind of secret that silently
+        rots into a postmortem. The sink layer ships a <code>FileSink</code> that writes
+        JSON lines, a <code>StdoutSink</code> that writes to the console, and an
+        <code>HTTPJSONSink</code> that POSTs to a generic endpoint. The recommended
+        path is the first two: let the Splunk Universal Forwarder, Azure Monitor Agent,
+        or Filebeat watch a file, and keep the SIEM credential in the tool that was
+        designed to hold it. The HTTP sink is there for operators who have already
+        decided that an Oversight-side credential is the right tradeoff.
+      </p>
+
+      <p>
+        Sentinel is the exception to the "operator holds the credential" rule, because
+        the Data Collector API requires an HMAC-SHA256 <code>Authorization</code>
+        header signed over a canonical string that includes the content length and an
+        RFC 1123 date. <code>sentinel_authorization()</code> implements the signing
+        recipe against the exact inputs Microsoft documents, and the unit tests pin
+        the output so a library user can treat it as a reference. Live POSTs still
+        need a caller that mints the date, serializes the body, and wires both into
+        the request, because any wrapper that computes those for you will eventually
+        drift out of spec.
+      </p>
+
+      <h2>Read-only iteration against a live registry</h2>
+
+      <p>
+        <code>iter_registry_events()</code> opens the registry database with
+        <code>PRAGMA query_only=ON</code> and a SQLite URI in read-only mode. That
+        matters because the intended deployment is "run the export job on the same
+        host as the registry on a cron." If the export took a write lock, a busy
+        registry would block beacon ingests while the SIEM forwarder caught up,
+        which is the wrong direction for a security tool. The CLI supports
+        <code>--since</code> and <code>--limit</code> so the cron job advances a
+        watermark rather than re-exporting every row every cycle.
+      </p>
+
+      <h2>What this is not</h2>
+
+      <p>
+        v0.4.6 is not a DLP product and it does not try to be. The formatters do
+        not attempt sentiment, severity, or user-risk scoring; those belong in the
+        SIEM's correlation engine or in the customer's existing identity graph.
+        The documentation is explicit that absence of a beacon is not evidence of
+        no leak. Corporate egress filtering, air-gapped readers, and sandboxed
+        previews all suppress beacon traffic. Dashboards that alert on the absence
+        of beacons need a baseline and an explicit policy, not a rule that fires
+        the moment a single beacon is missed.
+      </p>
+
+      <p>
+        The point of this release is simple. A provenance protocol whose output
+        never reaches the desk of the person investigating the leak is a protocol
+        whose output is decorative. Beacon events now ship in the native format of
+        the three SIEMs a regulated-industry customer is likely to have already
+        paid for, with the minimum honest framing around what the telemetry proves
+        and what it does not.
+      </p>
+
+    </div>
+  </div>
+</main>
+
+<footer class="site-footer">
+  <div class="container">
+    <p>Oversight Protocol &copy; 2026 Zion Boggan. Apache 2.0 License.</p>
+    <p style="color:var(--text-muted);font-size:13px;">Co-authored with Claude Opus 4.6 and 4.7 (Anthropic).</p>
+    <p><a href="https://github.com/oversight-protocol/oversight">GitHub</a></p>
+  </div>
+</footer>
+
+<script src="../js/nav.js" defer></script>
+</body>
+</html>

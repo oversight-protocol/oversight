@@ -1,0 +1,342 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Oversight Protocol: Data Provenance, Attribution, and Leak Detection</title>
+  <meta name="description" content="Oversight is an open protocol for cryptographic data provenance, multi-layer watermarking, and leak detection. Built in Python and Rust.">
+  <meta name="author" content="Zion Boggan">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+
+<nav class="site-nav">
+  <div class="nav-inner">
+    <a href="./" class="nav-brand"><span>Oversight</span> Protocol</a>
+    <ul class="nav-links">
+      <li><a href="./" class="active">Home</a></li>
+      <li><a href="demo/">Demo</a></li>
+      <li><a href="viewer/">Inspect</a></li>
+      <li><a href="docs/">Docs</a></li>
+      <li><a href="research/">Research</a></li>
+      <li><a href="blog/">Blog</a></li>
+      <li><a href="about.html">About</a></li>
+    </ul>
+  </div>
+</nav>
+
+<main>
+
+  <!-- Hero -->
+  <section class="hero">
+    <div class="container">
+      <h1><span>Oversight</span> Protocol</h1>
+      <p class="lead">
+        An open protocol for cryptographic data provenance, recipient attribution,
+        and leak detection. Seal documents to named recipients with layered watermarks,
+        post-quantum encryption, and tamper-evident transparency logs.
+      </p>
+      <div class="hero-actions">
+        <a href="viewer/" class="btn btn-primary">Inspect a Sealed File</a>
+        <a href="demo/" class="btn btn-secondary">Watermark Demo</a>
+        <a href="docs/" class="btn btn-secondary">Read the Docs</a>
+        <a href="https://github.com/oversight-protocol/oversight" class="btn btn-secondary">GitHub</a>
+      </div>
+    </div>
+  </section>
+
+  <!-- Stats -->
+  <section class="container">
+    <div class="stats">
+      <div class="stat">
+        <div class="stat-value">14,500+</div>
+        <div class="stat-label">Lines of Code</div>
+      </div>
+      <div class="stat">
+        <div class="stat-value">100+</div>
+        <div class="stat-label">Tests</div>
+      </div>
+      <div class="stat">
+        <div class="stat-value">2</div>
+        <div class="stat-label">Languages</div>
+      </div>
+      <div class="stat">
+        <div class="stat-value">11</div>
+        <div class="stat-label">Rust Crates</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Key Capabilities -->
+  <section class="container">
+    <h2 class="section-heading">Key Capabilities</h2>
+    <div class="card-grid">
+
+      <div class="card">
+        <h3>Recipient-Bound Encryption</h3>
+        <p>
+          Each sealed document is encrypted to a specific recipient using X25519 key
+          agreement and XChaCha20-Poly1305 authenticated encryption. The recipient's
+          identity is bound into the ciphertext, so a valid seal can only be opened by
+          the intended party. No shared secrets leave the sender's machine.
+        </p>
+      </div>
+
+      <div class="card">
+        <h3>Multi-Layer Watermarking</h3>
+        <p>
+          Three independent watermark layers provide defense in depth against removal.
+          Layer 1 inserts zero-width Unicode characters that survive copy-paste.
+          Layer 2 manipulates trailing whitespace patterns per line.
+          Layer 3 performs semantic synonym substitution guided by a controlled vocabulary,
+          producing marks that persist even through manual retyping.
+        </p>
+      </div>
+
+      <div class="card">
+        <h3>Post-Quantum Hybrid Mode</h3>
+        <p>
+          An optional hybrid suite combines ML-KEM-768 (FIPS 203) with X25519 for
+          key agreement, and ML-DSA-65 (FIPS 204) with Ed25519 for signatures. If
+          a future quantum adversary breaks elliptic-curve assumptions, the lattice
+          component keeps the document sealed. If lattice assumptions weaken first,
+          X25519 still holds.
+        </p>
+      </div>
+
+      <div class="card">
+        <h3>RFC 3161 Qualified Timestamps</h3>
+        <p>
+          Every seal carries an RFC 3161 timestamp from a third-party TSA (FreeTSA
+          primary, DigiCert fallback). The timestamp proves the document existed in
+          a specific form at a specific time, independent of the sender's clock.
+          Tokens are embedded in the seal and verifiable by anyone with the TSA's
+          root certificate.
+        </p>
+      </div>
+
+      <div class="card">
+        <h3>Passive Beacons</h3>
+        <p>
+          Sealed documents can carry passive beacons that fire on open: DNS lookups
+          against a controlled nameserver, HTTP tracking pixels, or OCSP callbacks.
+          No code executes on the reader's machine. The beacon encodes the recipient
+          fingerprint, so a network-layer signal reaches the issuer when a seal is
+          opened.
+        </p>
+      </div>
+
+      <div class="card">
+        <h3>RFC 6962 Transparency Logging</h3>
+        <p>
+          Every seal event goes into an append-only Merkle tree following the RFC 6962
+          Certificate Transparency spec. Entries get a signed tree head and an inclusion
+          proof, so any auditor can verify that a seal was logged without trusting the
+          log operator. Consistency proofs make silent deletion or rewriting detectable.
+        </p>
+      </div>
+
+      <div class="card">
+        <h3>Policy Enforcement</h3>
+        <p>
+          Each seal can carry access constraints: time windows (the document expires
+          after a deadline), maximum open counts (TOCTOU-safe via flock and atomic
+          rename), and jurisdiction restrictions by IP geolocation. The client checks
+          policy before decryption and logs violations to the transparency tree.
+        </p>
+      </div>
+
+      <div class="card">
+        <h3>Format Adapters</h3>
+        <p>
+          The seal pipeline works on plaintext, images (LSB embedding in the Y channel),
+          PDF (annotation-layer injection), and DOCX (Open XML field codes). Each format
+          has a dedicated adapter that normalizes content for watermarking and
+          reconstructs the output after decryption. More formats are straightforward
+          to add.
+        </p>
+      </div>
+
+    </div>
+  </section>
+
+  <!-- Architecture Overview -->
+  <section class="container">
+    <h2 class="section-heading">Architecture Overview</h2>
+
+    <div class="arch-flow">
+      <span class="arch-box">Plaintext</span>
+      <span class="arch-arrow">&rarr;</span>
+      <span class="arch-box">Watermark</span>
+      <span class="arch-arrow">&rarr;</span>
+      <span class="arch-box">Encrypt</span>
+      <span class="arch-arrow">&rarr;</span>
+      <span class="arch-box">Timestamp</span>
+      <span class="arch-arrow">&rarr;</span>
+      <span class="arch-box">Log</span>
+      <span class="arch-arrow">&rarr;</span>
+      <span class="arch-box">Seal</span>
+    </div>
+
+    <p>
+      A source document enters the pipeline and gets watermarked with all three layers,
+      with each recipient's copy receiving a unique mark derived from their public key.
+      The watermarked content is then encrypted via X25519 (or hybrid ML-KEM-768 +
+      X25519) key agreement and XChaCha20-Poly1305, then signed with the issuer's
+      Ed25519 key.
+    </p>
+    <p>
+      Before delivery, the content hash goes to an RFC 3161 timestamp authority and
+      gets appended to the Merkle tree. The final <code>.sealed</code> file bundles the
+      ciphertext, signature, timestamp token, inclusion proof, beacons, and policy.
+      On the other end, the open operation verifies the proof, checks the timestamp,
+      enforces policy, decrypts, and hands back the readable document with the
+      watermark metadata intact for forensic recovery if the content leaks later.
+    </p>
+  </section>
+
+  <!-- Current Status -->
+  <section class="container">
+    <h2 class="section-heading">Current Status</h2>
+
+    <p>
+      <span class="badge badge-green">Shipped</span>
+      <strong>v0.4.8</strong> is the current stable release. A patch covering two
+      upstream-driven fixes that unblock mobile and tighten TLS. The Rust core's 4 GiB
+      ciphertext-size cap is now gated to 64-bit targets and falls back to
+      <code>usize::MAX</code> on 32-bit, which is what unblocks the mobile companion's
+      <code>armv7</code> and <code>i686</code> Android builds. <code>rustls-webpki</code>
+      moved to 0.103.13 to pick up the GHSA-82j2-j2ch-gfr8 CRL parse fix and a corrected
+      URI name-constraint check, both of which apply to the Rekor TLS path. Wire format,
+      manifest, and CLI surface unchanged. v0.4.8 also adds
+      <a href="https://github.com/oversight-protocol/oversight/blob/main/docs/EMBEDDING.md"><code>docs/EMBEDDING.md</code></a>,
+      the integration contract for downstream consumers (seven verifier-safe crates, the
+      git-plus-tag pin pattern, minimum versions per target).
+      <a href="https://github.com/oversight-protocol/oversight-mobile">oversight-mobile
+      v0.1.12</a> switches to that pin in the same change so the desktop and mobile run
+      identical Rust source from a tagged release.
+      Writeup: <a href="blog/one-verification-core.html">One Verification Core: How the Desktop and Mobile Share Rust</a>.
+      Release notes: <a href="https://github.com/oversight-protocol/oversight/releases/tag/v0.4.8">v0.4.8 on GitHub</a>.
+    </p>
+    <p>
+      <span class="badge badge-green">Shipped</span>
+      <strong>Mobile verifier (v0.1.11)</strong> is on TestFlight as of 2026-04-26.
+      The <a href="https://github.com/oversight-protocol/oversight-mobile">oversight-protocol/oversight-mobile</a>
+      repo is a Flutter UI on top of the same Rust crates that power the desktop CLI,
+      embedded via <code>flutter_rust_bridge</code>. Verification is bit-identical with
+      the desktop. The whole iOS pipeline runs on GitHub-hosted macOS runners
+      (<code>macos-26</code>, Xcode 26, iOS 26 SDK) so the project does not require
+      Apple hardware to ship. Reproducible mobile builds are next on the roadmap.
+      Status page: <a href="mobile/">Mobile Verifier</a>. Writeup:
+      <a href="blog/mobile-beta.html">Mobile beta is live &mdash; and the Apple-side gotcha that nearly hid it</a>.
+    </p>
+    <p>
+      <span class="badge badge-green">Shipped</span>
+      The <a href="viewer/">browser-based Sealed File Inspector</a> is live. Drop a
+      <code>.sealed</code> file to parse the container, verify the issuer's Ed25519
+      signature via WebCrypto, and read the manifest, watermarks, beacons, and policy
+      directly in the browser. Optional registry lookup against the URL the manifest
+      declares. Nothing leaves the device unless the inspector is asked to hit the
+      registry. This closes the non-technical-recipient gap that has been blocking the
+      broad public launch.
+    </p>
+    <p>
+      <span class="badge badge-green">Shipped</span>
+      <strong>v0.4.7</strong> hardened registry federation. <code>docs/spec/registry-v1.md</code>
+      is now pinned against the reference implementation with the canonicalization algorithm,
+      the uniform error envelope, the full endpoint list including normative beacon paths,
+      and the evidence bundle fields fixed. A 32-check conformance harness at
+      <code>tests/test_registry_conformance.py</code> runs either against the reference
+      registry in-process or against a live operator URL, so an independent deployment can
+      claim v1 compatibility with evidence. Run it with
+      <code>OVERSIGHT_REGISTRY_URL=https://registry.example.org python3 tests/test_registry_conformance.py</code>.
+      Writeup: <a href="blog/registry-federation-conformance.html">v0.4.7: Registry Federation Conformance Is a Test, Not a Document</a>.
+    </p>
+    <p>
+      <span class="badge badge-green">Shipped</span>
+      <strong>v0.4.6</strong> brought SIEM export. Registry beacon events now ship
+      in three SIEM-native formats so security teams get Oversight telemetry into the incident
+      pipeline they already run. <code>oversight_core.siem</code> provides pure formatters for
+      Splunk HEC, Elastic Common Schema 8.x, and Microsoft Sentinel Log Analytics, plus a
+      Sentinel HMAC signing helper and minimal file, stdout, and HTTP sinks. The
+      <code>oversight siem export</code> CLI streams events as JSON lines, reading the
+      registry database in read-only mode so it is safe to run against a live service. The
+      operator guide lives at
+      <a href="https://github.com/oversight-protocol/oversight/blob/main/docs/SIEM.md"><code>docs/SIEM.md</code></a>.
+      Writeup: <a href="blog/siem-export.html">v0.4.6: SIEM Export for Splunk, Sentinel, and Elastic</a>.
+    </p>
+    <p>
+      <span class="badge badge-green">Shipped</span>
+      <strong>v0.4.5</strong> made L3 semantic watermarking a safety-first feature. L3 defaults
+      off for wording-sensitive document classes (legal, regulatory, technical specifications,
+      source code, SQL, logs, structured data), requires an explicit acknowledgement when
+      enabled because the recipient copy is textually non-identical to the canonical source,
+      and supports a boilerplate-only mode for contracts and filings. The manifest records
+      <code>canonical_content_hash</code> and <code>l3_policy</code> so disputes can reach
+      ground truth. v0.4.5 also shipped an <code>oversight gui</code> Tkinter starter, raised
+      PyPI dependency floors after a Dependabot follow-up, and published the public threat
+      model at <a href="research/threat-model.html">research/threat-model.html</a>.
+      Writeup: <a href="blog/l3-safety-gui.html">v0.4.5: L3 Semantic Watermark Safety and GUI Starter</a>.
+    </p>
+    <p>
+      <span class="badge badge-green">Shipped</span>
+      <strong>v0.4.4</strong> closed a security hardening pass that resolved nine findings
+      across the policy engine, Rekor verification, registry input validation, and the
+      container format. Failed decryption attempts no longer consume open counts. REGISTRY
+      and HYBRID policy modes fail closed instead of silently falling back to local state.
+      The registry rejects unsigned beacon and watermark sidecars that differ from the
+      signed manifest. DNS event callbacks to the registry require a shared
+      <code>OVERSIGHT_DNS_EVENT_SECRET</code> for non-loopback callers. Multi-recipient
+      sealing is disabled until the manifest format can honestly bind every recipient.
+      Writeup: <a href="blog/security-hardening.html">v0.4.4: Nine Security Findings and the Discipline of Failing Closed</a>.
+    </p>
+    <p>
+      <span class="badge badge-green">Live</span>
+      The attribution registry and beacon infrastructure are deployed at
+      <code>registry.oversightprotocol.dev</code>. HTTP, OCSP, DNS, and license beacons
+      are operational. Install with <code>pip install .</code> from the repository, run
+      <code>oversight keygen</code>, and seal your first file. For a desktop entry point,
+      run <code>oversight gui</code> to launch the Tkinter starter. To wire beacons into
+      an existing SIEM, <code>oversight siem export --format splunk|ecs|sentinel</code>
+      emits registry events in the native schema of each.
+    </p>
+    <p>
+      <span class="badge badge-green">Shipped</span>
+      <strong>v0.5</strong> integrated
+      <a href="https://rekor.sigstore.dev/">Sigstore Rekor v2</a> for public
+      transparency attestations. Seal registrations are now recorded in the
+      Sigstore public log via DSSE envelopes, verifiable by any auditor using
+      standard Sigstore tooling without Oversight-specific code.
+    </p>
+    <p>
+      <span class="badge badge-green">Shipped</span>
+      <strong>v0.6</strong> format adapters ported to Rust: text (fully functional L1/L2/L3),
+      PDF (annotation layer + JS/Launch rejection), DOCX (Open XML + field code sanitization),
+      and image (Y-channel LSB, imperceptible). The Rust CLI auto-detects input format.
+    </p>
+    <p>
+      <span class="badge badge-blue">In Progress</span>
+      <strong>v1.0</strong> registry port to Rust Axum + SQLx is scaffolded (1,125 LOC,
+      all endpoints implemented, <code>#![forbid(unsafe_code)]</code>). Pending: integration
+      testing, migration tooling from the Python registry, and wire format stability
+      declaration. Registry federation is a v1.0 prerequisite and is tracked in
+      <a href="https://github.com/oversight-protocol/oversight/blob/main/docs/spec/registry-v1.md"><code>docs/spec/registry-v1.md</code></a>.
+    </p>
+  </section>
+
+</main>
+
+<footer class="site-footer">
+  <div class="container">
+    <p>Oversight Protocol &copy; 2026 Zion Boggan. Apache 2.0 License.</p>
+    <p style="color:var(--text-muted);font-size:13px;">Co-authored with Claude Opus 4.6 and 4.7 (Anthropic).</p>
+    <p><a href="https://github.com/oversight-protocol/oversight">GitHub</a></p>
+  </div>
+</footer>
+
+<script src="js/nav.js" defer></script>
+</body>
+</html>

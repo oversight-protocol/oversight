@@ -1,0 +1,472 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Protocol Design and Construction | Oversight Protocol</title>
+  <meta name="description" content="Technical report on the cryptographic construction, threat model, and security arguments of the Oversight protocol.">
+  <meta name="author" content="Zion Boggan">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="../css/style.css">
+</head>
+<body>
+
+<nav class="site-nav">
+  <div class="nav-inner">
+    <a href="../" class="nav-brand"><span>Oversight</span> Protocol</a>
+    <ul class="nav-links">
+      <li><a href="../">Home</a></li>
+      <li><a href="../demo/">Demo</a></li>
+      <li><a href="../viewer/">Inspect</a></li>
+      <li><a href="../docs/">Docs</a></li>
+      <li><a href="../research/" class="active">Research</a></li>
+      <li><a href="../blog/">Blog</a></li>
+      <li><a href="../about.html">About</a></li>
+    </ul>
+  </div>
+</nav>
+
+<main>
+  <div class="container">
+    <div class="page-header">
+      <h1>Protocol Design and Construction</h1>
+      <p class="subtitle">Technical report on the Oversight cryptographic protocol</p>
+    </div>
+
+    <p style="color:var(--text-muted);font-size:14px;">
+      Zion Boggan &middot; April 2026 &middot; Oversight Protocol v0.4.4
+    </p>
+
+    <!-- Abstract -->
+    <h2 id="abstract">Abstract</h2>
+    <p>
+      Oversight is an open protocol for recipient-bound data provenance, attribution, and leak detection.
+      It addresses a gap in the current landscape: no existing system combines cryptographic sealing,
+      multi-layer watermarking, and append-only transparency logging into a single, open specification.
+      The protocol binds each sealed document to a named recipient using authenticated encryption with
+      associated data, embeds three independent watermark layers that survive progressively aggressive
+      removal attempts, and records every seal event in an RFC 6962 compliant Merkle tree. Two algorithm
+      suites are defined: a classical suite built on X25519, XChaCha20-Poly1305, and Ed25519, and a
+      post-quantum hybrid suite that adds ML-KEM-768 and ML-DSA-65. A reference implementation in Python
+      (5,689 LOC) and a performance-oriented port in Rust (2,934 LOC across 7 crates) together pass 76
+      tests, including 3 cross-language conformance checks that verify bit-identical output between
+      implementations.
+    </p>
+
+    <!-- 1. Introduction -->
+    <h2 id="introduction">1. Introduction</h2>
+    <p>
+      Document leaks remain one of the most persistent and damaging categories of security incident in both
+      government and private-sector contexts. When a confidential document surfaces in an unauthorized
+      channel, the affected organization faces two immediate questions: who received the document, and when
+      was it last known to be under control? Current tools answer neither question reliably.
+    </p>
+    <p>
+      Digital Rights Management (DRM) systems enforce access controls but are proprietary, brittle against
+      format conversion, and offer no forensic attribution once a document escapes the DRM container.
+      The Coalition for Content Provenance and Authenticity (C2PA) provides a metadata-based provenance
+      chain, but its architecture depends on cloud verification services, carries no watermarking capability,
+      and loses all provenance data when metadata is stripped. Proprietary watermarking solutions from
+      vendors such as Digimarc and Steganos embed marks into specific media types but operate as closed
+      systems with no interoperability guarantees, no transparency logging, and no cryptographic binding
+      between the watermark and the recipient identity.
+    </p>
+    <p>
+      Oversight addresses these limitations by specifying an open protocol that combines four capabilities
+      into a single pipeline: recipient-bound authenticated encryption, multi-layer watermarking with
+      graduated resilience, RFC 3161 qualified timestamps from independent authorities, and append-only
+      transparency logging with Merkle inclusion proofs. The protocol is defined at the wire-format level,
+      uses only NIST-standardized or widely-reviewed cryptographic primitives, and prohibits custom
+      cryptography. Both the specification and reference implementation are released under the Apache 2.0
+      license.
+    </p>
+
+    <!-- 2. Threat Model -->
+    <h2 id="threat-model">2. Threat Model</h2>
+
+    <h3>2.1 Assumptions</h3>
+    <p>
+      The protocol operates under three core assumptions. First, the issuer (sender) controls their signing
+      key and keeps it secret; compromise of the issuer's private key is outside the threat model. Second,
+      the recipient controls their decryption key and is responsible for its storage; the protocol provides
+      hardware-key integration guidance but does not mandate a specific key storage mechanism. Third, the
+      network between issuer and recipient is untrusted, but TLS is available for transport-layer
+      confidentiality during seal delivery and log interactions.
+    </p>
+
+    <h3>2.2 Adversary Classes</h3>
+    <p>
+      The following table enumerates the adversary classes considered by the protocol, their capabilities,
+      and the defense layers that address each one.
+    </p>
+
+    <table>
+      <thead>
+        <tr>
+          <th>Adversary</th>
+          <th>Capability</th>
+          <th>Defense</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>Passive interceptor</td>
+          <td>Observes ciphertext in transit</td>
+          <td>AEAD encryption (XChaCha20-Poly1305); no plaintext recovery without recipient key</td>
+        </tr>
+        <tr>
+          <td>Curious insider</td>
+          <td>Has legitimate access to the plaintext; attempts to leak without attribution</td>
+          <td>Three-layer watermarking binds the document to the recipient identity</td>
+        </tr>
+        <tr>
+          <td>Thief with wrong key</td>
+          <td>Possesses a valid key pair but is not the intended recipient</td>
+          <td>Recipient public key is bound into the KEM; decryption fails for non-matching keys</td>
+        </tr>
+        <tr>
+          <td>Tamperer</td>
+          <td>Modifies ciphertext or metadata in transit</td>
+          <td>AEAD authentication tag and Ed25519 signature over the manifest detect any modification</td>
+        </tr>
+        <tr>
+          <td>Format-conversion attacker</td>
+          <td>Converts the document to a different format (e.g., PDF to PNG) to strip marks</td>
+          <td>L3 synonym watermarks survive format conversion; L1/L2 may be lost</td>
+        </tr>
+        <tr>
+          <td>Metadata-stripping attacker</td>
+          <td>Removes all metadata and embedded markers from the file</td>
+          <td>L3 synonym marks are embedded in the semantic content and cannot be stripped as metadata</td>
+        </tr>
+        <tr>
+          <td>Nation-state with quantum computer</td>
+          <td>Can break classical elliptic-curve assumptions</td>
+          <td>OSGT-HYBRID-v1 suite adds ML-KEM-768 and ML-DSA-65 for post-quantum resistance</td>
+        </tr>
+      </tbody>
+    </table>
+
+    <h3>2.3 Explicit Non-Goals</h3>
+    <p>
+      Three scenarios are explicitly outside the protocol's threat model. The first is a fully airgapped
+      attacker who photographs or manually retypes the document into a clean system. While L3 synonym marks
+      increase the cost of such an attack, a sufficiently motivated adversary who retypes and paraphrases
+      every sentence can defeat the watermarking system; the protocol does not claim otherwise. The second
+      non-goal is a compromised issuer signing key. If the issuer's Ed25519 (or ML-DSA-65) private key is
+      leaked, an attacker can forge seals. Key management is the issuer's responsibility. The third non-goal
+      is a compromised registry (transparency log operator). If the log operator is adversarial, they can
+      withhold entries or present inconsistent views, though consistency proofs and gossip protocols can
+      detect such behavior after the fact.
+    </p>
+
+    <!-- 3. Cryptographic Construction -->
+    <h2 id="crypto">3. Cryptographic Construction</h2>
+
+    <h3>3.1 Algorithm Suites</h3>
+    <p>
+      The protocol defines two algorithm suites. <strong>OSGT-CLASSIC-v1</strong> uses X25519 for key
+      agreement, HKDF-SHA256 for key derivation, XChaCha20-Poly1305 for authenticated encryption, and
+      Ed25519 for digital signatures. This suite targets environments where post-quantum migration is not
+      yet required but may become necessary in the future. <strong>OSGT-HYBRID-v1</strong> extends the
+      classical suite with ML-KEM-768 (FIPS 203) for key encapsulation and ML-DSA-65 (FIPS 204) for
+      signatures. In the hybrid suite, both the classical and post-quantum key agreements are performed
+      independently, and their shared secrets are combined through a KEM combiner before key derivation.
+    </p>
+    <p>
+      No custom cryptographic primitives are permitted. Every algorithm used in Oversight is either a NIST
+      standard (AES, SHA-2, ML-KEM, ML-DSA) or a widely deployed construction with extensive public
+      analysis (X25519, XChaCha20-Poly1305, Ed25519). The protocol specification explicitly forbids
+      implementors from substituting non-standard constructions.
+    </p>
+
+    <h3>3.2 Hybrid KEM Combiner</h3>
+    <p>
+      When OSGT-HYBRID-v1 is selected, the protocol performs both an X25519 key agreement and an ML-KEM-768
+      encapsulation against the recipient's public keys. The two resulting shared secrets are concatenated
+      and fed into HKDF-SHA256 to derive the document encryption key (DEK). The derivation parameters are
+      fixed by the specification:
+    </p>
+    <pre><code>DEK = HKDF-SHA256(
+  salt  = "oversight-hybrid-v1",
+  ikm   = x25519_shared_secret || mlkem_shared_secret,
+  info  = "oversight-hybrid-dek-wrap",
+  len   = 32
+)</code></pre>
+    <p>
+      This combiner ensures that the DEK remains secure as long as at least one of the two underlying key
+      agreement mechanisms is unbroken. If a quantum adversary compromises the X25519 exchange, the
+      ML-KEM-768 shared secret still contributes full entropy to the derived key. Conversely, if ML-KEM-768
+      suffers a classical cryptanalytic break, the X25519 component maintains security at the 128-bit level.
+    </p>
+
+    <!-- 4. Container Format -->
+    <h2 id="container">4. Container Format</h2>
+    <p>
+      A sealed document is stored in the Oversight container format, which uses a fixed binary header
+      followed by length-prefixed sections. The header begins with the six-byte magic sequence
+      <code>OVSGHT</code>, followed by a one-byte version number and a one-byte suite identifier
+      (0x01 for OSGT-CLASSIC-v1, 0x02 for OSGT-HYBRID-v1). The body contains four sections in order:
+    </p>
+    <p>
+      The <strong>manifest</strong> is a canonical JSON object signed by the issuer's Ed25519 key. It
+      contains the sender's public key fingerprint, the recipient's public key fingerprint, a
+      randomly-generated file ID, the watermark mark_id, policy constraints, timestamp token references,
+      and the log inclusion proof index. Canonical JSON serialization (sorted keys, no optional whitespace)
+      ensures deterministic signing. The manifest is capped at 4 MB.
+    </p>
+    <p>
+      The <strong>wrapped DEK</strong> section contains the document encryption key encrypted to the
+      recipient's public key via the selected KEM. In the classical suite, this is an X25519 ephemeral
+      public key (32 bytes) plus the AEAD-encrypted DEK. In the hybrid suite, it additionally includes the
+      ML-KEM-768 ciphertext. This section is capped at 1 MB.
+    </p>
+    <p>
+      The <strong>ciphertext</strong> section contains the XChaCha20-Poly1305 encryption of the watermarked
+      plaintext. The 24-byte nonce is randomly generated and prepended to the ciphertext. The AEAD
+      additional data (AD) is the SHA-256 hash of the manifest, binding the ciphertext to its metadata. The
+      ciphertext section is capped at 4 GB, accommodating documents up to approximately 4 GB in size after
+      watermark insertion.
+    </p>
+    <p>
+      The <strong>signature</strong> section contains the issuer's Ed25519 signature (and, in the hybrid
+      suite, the ML-DSA-65 signature) over the concatenation of the manifest hash and the ciphertext hash.
+      Verifiers must check both signatures in the hybrid suite.
+    </p>
+
+    <!-- 5. Watermarking System -->
+    <h2 id="watermarking">5. Watermarking System</h2>
+    <p>
+      The Oversight watermarking system applies three independent mark layers to the plaintext before
+      encryption. Each layer targets a different attack surface and degrades gracefully when the layers
+      above it are stripped. The layering follows a defense-in-depth principle: L1 catches casual leaks, L2
+      catches intermediate processing pipelines, and L3 targets motivated adversaries willing to invest
+      significant effort in mark removal.
+    </p>
+
+    <h3>5.1 Layer 1: Zero-Width Unicode Characters</h3>
+    <p>
+      L1 encodes the 128-bit <code>mark_id</code> into each line of text using zero-width Unicode
+      characters. Three characters form the encoding alphabet: U+200B (Zero-Width Space) represents bit
+      value 0, U+200C (Zero-Width Non-Joiner) represents bit value 1, and U+200D (Zero-Width Joiner)
+      serves as a frame delimiter. The mark_id is inserted once per line, positioned after a deterministic
+      offset derived from the line content hash. This layer is invisible to human readers and survives
+      copy-paste operations in most text editors and word processors. It is trivially defeated by any tool
+      that strips non-printable Unicode characters, which is why it serves only as the first line of defense.
+    </p>
+
+    <h3>5.2 Layer 2: Trailing Whitespace Patterns</h3>
+    <p>
+      L2 encodes attribution data in the trailing whitespace at the end of each line. The encoding uses a
+      binary scheme where trailing spaces and tabs represent bit values. Each line carries a segment of the
+      mark_id in its trailing whitespace, and the full mark can be reconstructed from any contiguous run of
+      lines that covers the complete bit sequence. This layer survives format conversions that preserve line
+      structure but is defeated by whitespace-normalizing tools or editors configured to strip trailing
+      whitespace on save. It provides an intermediate detection capability between L1 and L3.
+    </p>
+
+    <h3>5.3 Layer 3: Synonym Rotation</h3>
+    <p>
+      L3 operates at the semantic level by substituting words with pre-defined synonyms from a controlled
+      vocabulary of 151 word classes. Each word class contains between 2 and 8 synonyms, and the selection
+      for a given recipient is determined by the mark_id bits mapped onto the synonym index within each
+      class. Approximately 20% of words in typical English prose fall into at least one word class, providing
+      sufficient coverage to encode the full mark_id with redundancy across a document of moderate length.
+    </p>
+    <p>
+      This layer survives the most aggressive attack scenarios in the threat model. Because the marks are
+      embedded in the actual word choices of the text, they persist through format conversion, metadata
+      stripping, screenshot-and-OCR pipelines, and even manual retyping (unless the attacker paraphrases
+      every substitutable word). Detection involves scanning the document against the synonym table and
+      computing a bit-distance metric against known mark_ids. A false-positive rate below 2<sup>-40</sup>
+      is achievable for documents exceeding 500 words.
+    </p>
+
+    <!-- 6. Transparency Logging -->
+    <h2 id="transparency">6. Transparency Logging</h2>
+    <p>
+      Every seal event produces a log entry in an append-only Merkle tree that follows the RFC 6962
+      (Certificate Transparency) data structures. The log stores the SHA-256 hash of the sealed container,
+      the issuer's public key fingerprint, the recipient's public key fingerprint, and the timestamp. Each
+      entry receives a signed tree head (STH) and an inclusion proof that allows any party with the entry
+      hash and the current STH to verify that the entry exists in the log without downloading the entire
+      tree.
+    </p>
+    <p>
+      Consistency proofs between successive STHs guarantee that the log is append-only: a log operator
+      cannot silently remove or alter past entries without producing a consistency proof failure. Auditors
+      can periodically fetch the latest STH and verify consistency against a previously stored STH to
+      detect log tampering.
+    </p>
+    <p>
+      The current implementation uses a self-hosted log server. The v0.5 roadmap includes migration support
+      for Sigstore Rekor v2, which would allow seal entries to be recorded in a publicly operated,
+      community-audited transparency log. The Rekor integration uses DSSE (Dead Simple Signing Envelope)
+      as the entry format, wrapping the seal metadata in a signed envelope that Rekor can index and serve.
+    </p>
+    <p>
+      Timestamps are obtained from RFC 3161 compliant Time Stamping Authorities. The primary TSA is FreeTSA,
+      with DigiCert as a fallback. The timestamp token is embedded in the seal manifest and can be verified
+      independently of the Oversight infrastructure, providing a third-party attestation of the seal time
+      that does not depend on the issuer's clock or the log operator's clock.
+    </p>
+
+    <!-- 7. Policy Enforcement -->
+    <h2 id="policy">7. Policy Enforcement</h2>
+    <p>
+      The seal manifest can include a policy object that constrains how and when the sealed document may be
+      opened. The client-side open operation evaluates these constraints before attempting decryption, and
+      policy violations are logged to the transparency tree.
+    </p>
+    <p>
+      <strong>Time windows.</strong> The <code>not_before</code> and <code>not_after</code> fields define a
+      validity window using ISO 8601 timestamps. The open operation compares the current time (verified
+      against the system clock and, optionally, against a network time source) to these bounds and refuses
+      decryption outside the window. This enables use cases such as embargoed document releases and
+      automatic expiration.
+    </p>
+    <p>
+      <strong>Maximum opens.</strong> The <code>max_opens</code> field limits the number of times a sealed
+      document can be decrypted. The counter is maintained in a local state file protected against
+      time-of-check/time-of-use (TOCTOU) races by advisory file locking (<code>flock</code>) and atomic
+      rename on counter update. This mechanism is enforced locally and is therefore best suited for
+      honest-but-curious recipients; a fully adversarial recipient can bypass it by modifying the client.
+    </p>
+    <p>
+      <strong>Jurisdiction restrictions.</strong> The policy can specify allowed or denied jurisdictions
+      using ISO 3166-1 country codes. The open operation resolves the client's jurisdiction via IP
+      geolocation and enforces the constraint. This is a best-effort mechanism and can be circumvented by
+      VPN or proxy use, but it provides a compliance signal for recipients operating in good faith.
+    </p>
+    <p>
+      <strong>File-ID sanitization.</strong> All file identifiers in the manifest are validated against a
+      strict allowlist of characters and checked for path traversal sequences (<code>../</code>,
+      <code>..\\</code>, null bytes). The open operation rejects any seal whose file ID fails sanitization,
+      preventing an attacker from crafting a seal that writes to an arbitrary filesystem path.
+    </p>
+
+    <!-- 8. Implementation -->
+    <h2 id="implementation">8. Implementation</h2>
+    <p>
+      The protocol has two implementations that are developed in parallel and tested for mutual
+      compatibility.
+    </p>
+    <p>
+      The <strong>Python reference implementation</strong> comprises 5,689 lines of code across the core
+      library, CLI, and test suite. It uses the <code>cryptography</code> library (which wraps OpenSSL) for
+      all cryptographic operations and <code>oqs-python</code> for ML-KEM-768 and ML-DSA-65 in the hybrid
+      suite. The Python implementation prioritizes correctness and readability over performance and serves as
+      the canonical reference for protocol behavior. It includes 31 tests covering key generation, seal and
+      open round-trips, watermark insertion and extraction for all three layers, policy enforcement edge
+      cases, and transparency log operations.
+    </p>
+    <p>
+      The <strong>Rust port</strong> comprises 2,934 lines of code distributed across 7 crates:
+      <code>oversight-core</code> (protocol logic), <code>oversight-crypto</code> (cryptographic
+      abstractions), <code>oversight-watermark</code> (three-layer watermarking engine),
+      <code>oversight-container</code> (binary format serialization), <code>oversight-log</code>
+      (Merkle tree and inclusion proofs), <code>oversight-policy</code> (constraint evaluation), and
+      <code>oversight-cli</code> (command-line interface). The Rust implementation uses the
+      <code>x25519-dalek</code>, <code>chacha20poly1305</code>, and <code>ed25519-dalek</code> crates
+      for classical cryptography, and <code>pqcrypto</code> for post-quantum algorithms. It includes 42
+      tests.
+    </p>
+    <p>
+      Three <strong>cross-language conformance tests</strong> verify that the Python and Rust
+      implementations produce bit-identical sealed containers for the same inputs. These tests use fixed
+      test vectors with predetermined keys and nonces, ensuring that any divergence between implementations
+      is caught immediately. All 76 tests (31 Python + 42 Rust + 3 conformance) pass on the current release.
+    </p>
+
+    <!-- 9. Related Work -->
+    <h2 id="related-work">9. Related Work</h2>
+    <p>
+      <strong>C2PA</strong> (Coalition for Content Provenance and Authenticity) defines a metadata-based
+      provenance chain for digital media. It binds a content credential to an asset using cryptographic
+      signatures and supports claim aggregation across an editing history. However, C2PA operates primarily
+      at the metadata layer: it does not watermark the content itself, and all provenance data is lost when
+      metadata is stripped. C2PA verification also depends on cloud services for revocation checking and
+      trust list updates. Oversight differs by embedding attribution directly into the document content
+      through watermarking, providing forensic traceability that survives metadata removal.
+    </p>
+    <p>
+      <strong>IRM and DRM systems</strong> (Microsoft Purview Information Protection, Adobe LiveCycle
+      Rights Management) enforce access controls on documents through proprietary client software. These
+      systems prevent unauthorized access within their ecosystem but offer no cross-platform interoperability,
+      no open specification, and no forensic attribution after a document escapes the DRM boundary. Once a
+      user exports or screenshots the content, DRM provides no further protection. Oversight's watermarking
+      layers continue to provide attribution even after the encryption envelope is removed.
+    </p>
+    <p>
+      <strong>Academic watermarking research</strong> has produced a large body of work on robust and
+      imperceptible marking techniques for text, images, and audio. Notable contributions include
+      natural-language watermarking via synonym substitution (Topkara et al., 2006), syntactic tree
+      manipulation (Atallah et al., 2001), and neural text watermarking (Kirchenbauer et al., 2023).
+      These techniques are typically studied in isolation, without integration into a provenance or
+      encryption framework. Oversight's L3 synonym layer draws on this literature but embeds the watermarking
+      within a complete seal-and-verify pipeline that includes encryption, timestamping, and transparency
+      logging.
+    </p>
+    <p>
+      <strong>Sigstore</strong> provides transparency logging and keyless signing for software supply chain
+      artifacts. Its Rekor component implements an append-only transparency log with Merkle inclusion proofs.
+      Oversight's transparency logging follows the same RFC 6962 data structures and plans to integrate with
+      Rekor v2 as an optional backend. However, Sigstore does not address document watermarking, recipient
+      binding, or policy enforcement. The two systems are complementary: Sigstore secures software artifact
+      provenance, while Oversight secures document provenance.
+    </p>
+
+    <!-- 10. Current Status and Roadmap -->
+    <h2 id="roadmap">10. Current Status and Roadmap</h2>
+    <p>
+      Version 0.4.1 is the current stable release. It includes the full seal/open pipeline for both
+      algorithm suites, all three watermark layers, RFC 3161 timestamping, Merkle-tree transparency logging,
+      passive beacons, and policy enforcement. The Python and Rust implementations pass 76 tests in total,
+      including cross-language conformance checks.
+    </p>
+    <p>
+      <strong>v0.5</strong> targets Sigstore Rekor v2 integration as an alternative transparency backend.
+      Seal entries will be wrapped in DSSE envelopes and submitted to a Rekor instance, allowing public
+      auditability without requiring the issuer to operate their own log server. Additional v0.5 goals
+      include reproducible builds for the Rust crates and expanded format adapter coverage for HTML and
+      Markdown inputs.
+    </p>
+    <p>
+      <strong>v0.6</strong> will port the remaining format adapters (PDF, DOCX, image LSB) from Python to
+      Rust, enabling a single statically-linked binary for all supported document types. The Rust CLI will
+      become the recommended distribution for production use.
+    </p>
+    <p>
+      <strong>v1.0</strong> will port the transparency log registry from the current Python Flask
+      implementation to Rust using the Axum web framework. This release will also finalize the wire protocol
+      and declare format stability, after which breaking changes will require a major version increment.
+    </p>
+    <p>
+      A submission to <strong>USENIX Security 2026, Cycle 2</strong> (deadline June 2026) is the primary
+      academic target. The submission will cover the protocol specification, threat model, watermark
+      resilience measurements, and performance benchmarks across both implementations.
+    </p>
+
+    <hr>
+    <p style="color:var(--text-muted);font-size:14px;">
+      This document describes the Oversight protocol as implemented in v0.4.1. The specification may evolve;
+      consult the <a href="https://github.com/oversight-protocol/oversight/blob/main/docs/SPEC.md">canonical
+      specification</a> for the latest version.
+    </p>
+
+  </div>
+</main>
+
+<footer class="site-footer">
+  <div class="container">
+    <p>Oversight Protocol &copy; 2026 Zion Boggan. Apache 2.0 License.</p>
+    <p style="color:var(--text-muted);font-size:13px;">Co-authored with Claude Opus 4.6 and 4.7 (Anthropic).</p>
+    <p><a href="https://github.com/oversight-protocol/oversight">GitHub</a></p>
+  </div>
+</footer>
+
+<script src="../js/nav.js" defer></script>
+</body>
+</html>

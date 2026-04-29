@@ -1,0 +1,134 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Blog | Oversight Protocol</title>
+  <meta name="description" content="Development notes and technical writeups from the Oversight Protocol project.">
+  <meta name="author" content="Zion Boggan">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="../css/style.css">
+</head>
+<body>
+
+<nav class="site-nav">
+  <div class="nav-inner">
+    <a href="../" class="nav-brand"><span>Oversight</span> Protocol</a>
+    <ul class="nav-links">
+      <li><a href="../">Home</a></li>
+      <li><a href="../demo/">Demo</a></li>
+      <li><a href="../viewer/">Inspect</a></li>
+      <li><a href="../docs/">Docs</a></li>
+      <li><a href="../research/">Research</a></li>
+      <li><a href="../blog/" class="active">Blog</a></li>
+      <li><a href="../about.html">About</a></li>
+    </ul>
+  </div>
+</nav>
+
+<main>
+
+  <div class="container">
+    <div class="page-header">
+      <h1>Blog</h1>
+      <p class="subtitle">Development notes and technical writeups</p>
+    </div>
+
+    <ul class="blog-list">
+
+      <li class="blog-entry">
+        <div class="blog-date">2026-04-29</div>
+        <h2><a href="one-verification-core.html">One Verification Core: How the Desktop and Mobile Share Rust</a></h2>
+        <p class="excerpt">Two paired pushes today. Oversight v0.4.8's new <code>docs/EMBEDDING.md</code> documents the integration contract for downstream consumers: seven verifier-safe crates, four crates intentionally out of scope, the git-plus-tag pin pattern, and the minimum versions per target. Oversight-mobile v0.1.12 switches the Flutter app's Rust deps from sibling-directory path deps to a tag pin against v0.4.8, so a fresh clone of either repo now builds without sibling-checkout choreography. Why path deps were the right call for development and the wrong call for shipping, and what this unblocks for reproducible mobile builds.</p>
+      </li>
+
+      <li class="blog-entry">
+        <div class="blog-date">2026-04-26</div>
+        <h2><a href="mobile-beta.html">Mobile beta is live &mdash; and the Apple-side gotcha that nearly hid it</a></h2>
+        <p class="excerpt">The Oversight mobile verifier is on TestFlight as of today, sharing the same Rust verification core as the desktop CLI. Why a provenance protocol needs a phone-shaped surface, how the Flutter + Rust architecture stays bit-identical with the desktop, the iOS-without-a-Mac CI pipeline, and the Info.plist key that quietly hides every build from internal testers if you skip it.</p>
+      </li>
+
+      <li class="blog-entry">
+        <div class="blog-date">2026-04-22</div>
+        <h2><a href="registry-federation-conformance.html">v0.4.7: Registry Federation Conformance Is a Test, Not a Document</a></h2>
+        <p class="excerpt">Federation is the part of an open protocol that has to be earned. v0.4.7 hardens the registry v1 interop spec against the reference implementation, deletes a phantom endpoint that was never served, pins JSON canonicalization, ships a uniform error envelope, and lands a 32-check conformance harness that runs in-process for CI or against any live operator URL. Why this is the v1.0 acceptance gate, what the harness proves, and what it deliberately does not.</p>
+      </li>
+
+      <li class="blog-entry">
+        <div class="blog-date">2026-04-22</div>
+        <h2><a href="siem-export.html">v0.4.6: SIEM Export for Splunk, Sentinel, and Elastic</a></h2>
+        <p class="excerpt">Registry beacon events now ship in three SIEM-native formats. Splunk HEC envelopes, Elastic Common Schema 8.x documents, and Microsoft Sentinel Log Analytics custom-log rows. Pure formatters, file and stdout sinks, a read-only SQLite iterator, and an HMAC signing helper for the Sentinel Data Collector API. The operator guide is honest about what beacon absence does and does not prove.</p>
+      </li>
+
+      <li class="blog-entry">
+        <div class="blog-date">2026-04-20</div>
+        <h2><a href="l3-safety-gui.html">v0.4.5: L3 Semantic Watermark Safety and GUI Starter</a></h2>
+        <p class="excerpt">Semantic watermarks are powerful because they survive reformatting and retyping, and dangerous because they change the recipient's copy. v0.4.5 defaults L3 off for legal, regulatory, technical-spec, source-code, SQL, log, and structured data; requires explicit acknowledgement when enabled; records a canonical_content_hash for dispute resolution; and ships a Tkinter GUI starter on the path to a non-technical user experience.</p>
+      </li>
+
+      <li class="blog-entry">
+        <div class="blog-date">2026-04-20</div>
+        <h2><a href="security-hardening.html">v0.4.4: Nine Security Findings and the Discipline of Failing Closed</a></h2>
+        <p class="excerpt">Codex (GPT-5.4) audited the Oversight codebase and found 9 security issues: a TOCTOU race in max_opens, POSIX-only file locking on Windows, silent registry fallbacks, unverified Rekor digests, unsigned registry sidecars, a broken multi-recipient seal, and more. Every fix follows one principle: security mechanisms must fail closed.</p>
+      </li>
+
+      <li class="blog-entry">
+        <div class="blog-date">2026-04-19</div>
+        <h2><a href="anti-stripping.html">Defending Against Watermark Stripping: Content Fingerprints and Error Correction</a></h2>
+        <p class="excerpt">How Oversight v0.4.3 defends against the VM-strip-export attack with ECC-protected synonym bits (R=7 repetition codes), winnowing content fingerprints, a 5-phase attribution pipeline, and an honest account of the information-theoretic limits from 19 surveyed papers.</p>
+      </li>
+
+      <li class="blog-entry">
+        <div class="blog-date">2026-04-19</div>
+        <h2><a href="l3-integration.html">Wiring L3 Semantic Watermarks into the Pipeline: From Stub to Production</a></h2>
+        <p class="excerpt">The L3 semantic watermark existed in semantic.py but was never wired into the main pipeline or CLI. v0.4.2 fixes the stub problem, adds multi-layer Bayesian fusion, partial L2 recovery, 55 expanded format-agnostic mark channels, and per-phase diagnostic output.</p>
+      </li>
+
+      <li class="blog-entry">
+        <div class="blog-date">2026-04-19</div>
+        <h2><a href="rekor-v2-migration.html">Replacing the Custom Merkle Log with Sigstore Rekor v2</a></h2>
+        <p class="excerpt">Why Oversight v0.5 is migrating from a self-hosted Merkle tree to Sigstore Rekor v2, the DSSE envelope design, the privacy decision to hash recipient keys before logging, and what this means for auditors who want to verify bundles without Oversight code.</p>
+      </li>
+
+      <li class="blog-entry">
+        <div class="blog-date">2026-04-17</div>
+        <h2><a href="post-quantum.html">Preparing for Post-Quantum: ML-KEM-768 and Hybrid Key Establishment</a></h2>
+        <p class="excerpt">Oversight's hybrid cipher suite combines X25519 with ML-KEM-768 and Ed25519 with ML-DSA-65 to defend against harvest-now-decrypt-later attacks on sealed documents with long-term sensitivity.</p>
+      </li>
+
+      <li class="blog-entry">
+        <div class="blog-date">2026-04-10</div>
+        <h2><a href="python-to-rust.html">Porting Oversight to Rust: Cross-Language Cryptographic Conformance</a></h2>
+        <p class="excerpt">Seven Rust crates, 2,934 lines of code, and the pursuit of bit-identical output between Python and Rust implementations. Includes the RFC 6962 Merkle tree conformance bug and a mutex deadlock that Python's GIL had been hiding.</p>
+      </li>
+
+      <li class="blog-entry">
+        <div class="blog-date">2026-03-28</div>
+        <h2><a href="watermark-layers.html">Three Layers of Invisible Watermarking: Surviving Copy-Paste, Reformatting, and the Airgap</a></h2>
+        <p class="excerpt">A technical walkthrough of Oversight's three watermark layers: zero-width Unicode encoding, trailing whitespace patterns, and a 151-class semantic synonym rotation that survives screenshots and retyping.</p>
+      </li>
+
+      <li class="blog-entry">
+        <div class="blog-date">2026-03-15</div>
+        <h2><a href="building-oversight.html">Building Oversight: Why I Wrote an Open Protocol for Data Provenance</a></h2>
+        <p class="excerpt">The motivation for building an open data provenance protocol: why existing solutions (DRM, C2PA, metadata tagging) fall short, and the design principles behind Oversight's sealed container format.</p>
+      </li>
+
+    </ul>
+  </div>
+
+</main>
+
+<footer class="site-footer">
+  <div class="container">
+    <p>Oversight Protocol &copy; 2026 Zion Boggan. Apache 2.0 License.</p>
+    <p style="color:var(--text-muted);font-size:13px;">Co-authored with Claude Opus 4.6 and 4.7 (Anthropic).</p>
+    <p><a href="https://github.com/oversight-protocol/oversight">GitHub</a></p>
+  </div>
+</footer>
+
+<script src="../js/nav.js" defer></script>
+</body>
+</html>

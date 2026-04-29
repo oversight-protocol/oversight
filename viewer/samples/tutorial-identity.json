@@ -1,0 +1,8 @@
+{
+  "recipient_id": "tutorial@oversightprotocol.dev",
+  "x25519_priv": "6037dc677b6a6abad9a395eaffe0a8304d48171dbc414cdc3aa0b03e49214841",
+  "x25519_pub": "4e120f965d21650f7940de7f866bf3112144822f28a2417a03ef374a3049496b",
+  "ed25519_priv": "public-tutorial-key-does-not-sign",
+  "ed25519_pub": "public-tutorial-key-does-not-sign",
+  "_note": "PUBLIC TUTORIAL KEY. Demo-only. Do not use for real content."
+}

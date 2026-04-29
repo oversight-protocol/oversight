@@ -1,0 +1,282 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Wiring L3 Semantic Watermarks into the Pipeline: From Stub to Production | Oversight Protocol</title>
+  <meta name="description" content="How Oversight v0.4.2 integrated the L3 semantic watermark (synonym rotation, 151 classes) into the main pipeline, with multi-layer Bayesian fusion, partial L2 recovery, and expanded format-agnostic marks.">
+  <meta name="author" content="Zion Boggan">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="../css/style.css">
+</head>
+<body>
+
+<nav class="site-nav">
+  <div class="nav-inner">
+    <a href="../" class="nav-brand"><span>Oversight</span> Protocol</a>
+    <ul class="nav-links">
+      <li><a href="../">Home</a></li>
+      <li><a href="../demo/">Demo</a></li>
+      <li><a href="../viewer/">Inspect</a></li>
+      <li><a href="../docs/">Docs</a></li>
+      <li><a href="../research/">Research</a></li>
+      <li><a href="../blog/" class="active">Blog</a></li>
+      <li><a href="../about.html">About</a></li>
+    </ul>
+  </div>
+</nav>
+
+<main>
+  <div class="container">
+
+    <div class="blog-post-header">
+      <h1>Wiring L3 Semantic Watermarks into the Pipeline: From Stub to Production</h1>
+      <div class="blog-post-meta">2026-04-19 &middot; Zion Boggan &middot; ~10 min read</div>
+    </div>
+
+    <div class="blog-content">
+
+      <p>
+        Oversight has had a semantic watermark layer since v0.3. The 151-class synonym dictionary
+        existed in <code>oversight_core/semantic.py</code>, complete with embedding and extraction
+        functions, punctuation fingerprinting, and a per-word variant selection algorithm keyed to
+        the <code>mark_id</code>. It passed its own unit tests. It was, on paper, a working
+        watermark. There was one problem: nothing called it.
+      </p>
+
+      <p>
+        The main watermark module (<code>watermark.py</code>) had an <code>apply_all()</code>
+        function that applied L1 (zero-width Unicode) and L2 (trailing whitespace), then returned.
+        The CLI's <code>seal</code> command invoked <code>apply_all()</code> and recorded the result
+        in the manifest. L3 was invisible to both. The <code>recover_marks()</code> function
+        similarly checked L1 and L2, found nothing if those layers had been stripped, and printed
+        "Marks recovered: (none)." The synonym rotation code sat in its module, tested in isolation,
+        never touching a real sealed document.
+      </p>
+
+      <p>
+        This is the stub problem. The code exists but the wiring does not. It is easy to miss
+        because everything looks connected at a glance: <code>semantic.py</code> is in the right
+        directory, the function names follow the right conventions, the tests pass. But no
+        integration test ever seals a file, strips L1 and L2, and attempts L3 recovery, because
+        the pipeline never applies L3 in the first place. v0.4.2 fixes this.
+      </p>
+
+      <h2>Why layer order matters</h2>
+
+      <p>
+        The first question I had to answer was sequencing. The old <code>apply_all()</code> ran
+        L1 first, then L2. If L3 were simply appended at the end, it would scan text that already
+        contained zero-width characters. A word like "important" might have a ZWSP inserted between
+        the "i" and the "m" by L1, causing L3's word tokenizer to see two fragments instead of one
+        word. The synonym lookup would fail silently, and no L3 mark would be applied to that word.
+      </p>
+
+      <p>
+        The correct order is L3 first, L2 second, L1 last. L3 operates on clean prose and makes
+        synonym substitutions. L2 appends trailing whitespace to lines, which does not affect word
+        boundaries. L1 inserts zero-width characters between words, which is safe because L3 has
+        already finished its work. On extraction, the order reverses: L1 is read first (cheapest
+        to extract), then L2, then L3. If L1 succeeds, we have high-confidence attribution
+        immediately. If L1 is missing, we fall through to L2 and L3, where the semantic signal
+        lives.
+      </p>
+
+      <h2>Expanded format-agnostic marks</h2>
+
+      <p>
+        While wiring L3 into the pipeline, I expanded the set of format-agnostic marks beyond
+        the original synonym rotation and punctuation fingerprinting. The new sublayers are
+        straightforward bit channels that survive every kind of format conversion, invisible-character
+        stripping, and screenshot/OCR.
+      </p>
+
+      <p>
+        The first addition is 25 British/American spelling variant pairs. Words like "color" versus
+        "colour," "organization" versus "organisation," and "analyze" versus "analyse" each encode
+        one bit of the <code>mark_id</code>. The choice is deterministic: given a mark_id and a
+        word position, the engine always picks the same spelling variant. An adversary who strips
+        zero-width characters and trailing whitespace has no reason to also normalize spelling
+        conventions, so these bits persist.
+      </p>
+
+      <p>
+        The second addition is 30 contraction expansion/collapse pairs. "Don't" versus "do not,"
+        "it's" versus "it is," "we'll" versus "we will." Each eligible contraction in the document
+        is either expanded or collapsed based on mark_id bits. Like spelling variants, contractions
+        survive format conversion and are invisible to stripping tools that target encoding artifacts.
+      </p>
+
+      <p>
+        The third addition is number formatting: comma-separated versus plain digits ("1,000" versus
+        "1000"), percent symbol versus word ("50%" versus "50 percent"). These are less common per
+        document than spelling or contraction choices, but in data-heavy reports they contribute a
+        meaningful number of additional bit channels.
+      </p>
+
+      <p>
+        Combined, these sublayers add roughly 55 bit channels per document on top of the existing
+        synonym and punctuation marks. The <code>verify_semantic()</code> function now scores all
+        sublayers with a weighted combination and a 0.65 threshold. The weighting reflects the
+        relative reliability of each sublayer: synonym rotation carries the most weight because it
+        has the most instances per page, followed by spelling variants, contractions, punctuation,
+        and number formatting.
+      </p>
+
+      <h2>Multi-layer Bayesian fusion</h2>
+
+      <p>
+        Before v0.4.2, <code>recover_marks()</code> returned per-layer results independently. L1
+        returned a candidate or nothing. L2 returned a candidate or nothing. L3 returned nothing
+        because it was never called. The CLI printed whichever layer succeeded and gave up if none
+        did.
+      </p>
+
+      <p>
+        The new <code>_fuse_candidates()</code> function replaces this with a probabilistic scoring
+        system. It collects candidates from all three layers, each annotated with a confidence score.
+        L1 extraction produces a confidence of 1.0 (the mark is either present or absent, no
+        ambiguity). L2 now reports partial confidence via <code>extract_ws_partial()</code>, which I
+        will discuss below. L3 reports a confidence derived from the fraction of synonym classes
+        that matched.
+      </p>
+
+      <p>
+        The fusion formula assumes independence between layers (a simplification, but a reasonable
+        one since each layer uses a different signal channel). For a candidate mark_id that appears
+        in multiple layers, the combined score is <code>1 - product(1 - s_i)</code>, where
+        <code>s_i</code> is each layer's confidence. A document where L1 is stripped (confidence 0),
+        L2 is partially recovered (confidence 0.6), and L3 shows a 0.7 synonym match produces a
+        fused confidence of <code>1 - (1 - 0.6)(1 - 0.7) = 0.88</code>. Neither L2 nor L3 alone
+        would clear a 0.8 threshold, but together they provide strong evidence.
+      </p>
+
+      <p>
+        The output of <code>_fuse_candidates()</code> is a ranked list of candidate mark_ids with
+        their fused confidence scores and per-layer attribution. The CLI now prints this ranked
+        list instead of a bare binary result.
+      </p>
+
+      <h2>Partial L2 recovery</h2>
+
+      <p>
+        The old L2 extractor was all-or-nothing. It decoded trailing whitespace patterns from
+        every line, reconstructed the full 128-bit mark_id, and returned it if the reconstruction
+        was valid. If any lines had been modified (truncated, reformatted, re-wrapped), the
+        reconstruction failed and the extractor returned <code>None</code>.
+      </p>
+
+      <p>
+        This was wasteful. A document that preserves 80% of its original line structure still
+        has 80% of the L2 signal intact. Discarding that information because the last 20% is
+        missing means throwing away useful evidence.
+      </p>
+
+      <p>
+        The new <code>extract_ws_partial()</code> function returns a partial candidate with a
+        confidence score: <code>bits_recovered / bits_needed</code>. If a document has 100 lines
+        that should encode L2 bits and 84 of those lines still have their original trailing
+        whitespace, the extractor returns the best-fit mark_id at 84% confidence rather than
+        returning nothing. The threshold for inclusion in the fusion results is 50%. Below that,
+        the partial signal is too noisy to be useful.
+      </p>
+
+      <p>
+        Returning "16% confidence" is better than returning <code>None</code>, and here is why:
+        even a low-confidence L2 partial match can confirm or deny a candidate from another layer.
+        If L3 produces two candidate mark_ids at similar confidence, a weak L2 signal that matches
+        one of them breaks the tie. The fusion system treats confidence as evidence weight, not as
+        a pass/fail gate.
+      </p>
+
+      <h2>Diagnostic output</h2>
+
+      <p>
+        The old CLI <code>attribute</code> command had a frustrating failure mode. When attribution
+        failed, it printed "Marks recovered: (none)" with no further context. An operator had no
+        way to know whether the failure was caused by L1 stripping, L2 stripping, a corrupted
+        file, a dictionary mismatch, or simply a file that was never watermarked. Debugging
+        required manually calling each layer's extraction function in a Python shell.
+      </p>
+
+      <p>
+        The rewritten <code>attribute</code> command runs a four-phase pipeline with per-phase
+        diagnostics. Phase 1 attempts direct extraction from all three layers and reports what
+        each one found. Phase 2 queries the registry for known mark_ids matching any partial
+        evidence. Phase 3 runs L3 verification against candidate mark_ids, testing whether the
+        semantic patterns in the leaked text match a specific mark. Phase 4 runs Bayesian fusion
+        over all candidates and produces the ranked output.
+      </p>
+
+      <p>
+        Each phase prints a structured summary. If L1 extraction fails, the diagnostic states
+        "L1: no zero-width characters found (likely stripped)." If L2 partially succeeds, it
+        reports "L2: 67 of 98 bits recovered (68% confidence), best candidate: &lt;mark_id&gt;."
+        If L3 matches a known mark, it reports "L3: synonym score 0.83 against mark &lt;id&gt;,
+        punctuation 2/3 bits, spelling 8/12 bits." The operator can see exactly where attribution
+        broke down and why.
+      </p>
+
+      <h2>The test that justified the whole effort</h2>
+
+      <p>
+        The test that convinced me this integration was correct is simple in concept and satisfying
+        in result. Take a document. Seal it with all three layers. Strip all zero-width characters
+        (killing L1). Trim all trailing whitespace (killing L2). Feed the stripped text to the
+        attribution pipeline. Before v0.4.2, this produced "Marks recovered: (none)." After
+        v0.4.2, L3 recovered the mark with a 100% synonym score.
+      </p>
+
+      <p>
+        100% is the score for an unmodified document where every synonym-class word still carries
+        its watermark selection. In a real adversarial scenario, the score would be lower because
+        the adversary might also paraphrase or truncate the document. But the point of this test
+        is narrower: it validates that the VM-strip-export attack (open in airgapped VM, strip
+        invisible characters and whitespace, export clean file) no longer defeats Oversight. The
+        L3 semantic signal survives intact because it is encoded in the visible words, not in
+        formatting artifacts.
+      </p>
+
+      <p>
+        This was the gap that made the stub problem dangerous. Oversight's documentation and
+        architecture diagrams described three watermark layers. The code implemented three layers.
+        But only two were connected to the pipeline. An adversary who read the source code would
+        discover that stripping L1 and L2 was sufficient, regardless of what the documentation
+        claimed about L3. Now the code matches the architecture, and the test proves it.
+      </p>
+
+      <h2>What remains</h2>
+
+      <p>
+        The L3 integration is necessary but not sufficient. Synonym rotation survives stripping
+        attacks but not paraphrasing attacks. If the adversary rewrites the document in their own
+        words, or feeds it through an LLM with "rewrite this," all embedded marks are destroyed.
+        The next post covers the anti-stripping research and the defenses built in v0.4.3:
+        error-correcting codes over synonym bits, content fingerprinting via winnowing, and the
+        5-phase attribution pipeline that falls back to server-side fingerprints when all embedded
+        marks fail.
+      </p>
+
+      <p>
+        The Rust CLI does not yet embed L3 or compute fingerprints. That work is scoped for v0.5,
+        alongside the Rekor v2 migration. For now, L3 is Python-only, which is acceptable because
+        the Python CLI is the reference implementation and the one used for all current testing.
+      </p>
+
+    </div>
+  </div>
+</main>
+
+<footer class="site-footer">
+  <div class="container">
+    <p>Oversight Protocol &copy; 2026 Zion Boggan. Apache 2.0 License.</p>
+    <p style="color:var(--text-muted);font-size:13px;">Co-authored with Claude Opus 4.6 and 4.7 (Anthropic).</p>
+    <p><a href="https://github.com/oversight-protocol/oversight">GitHub</a></p>
+  </div>
+</footer>
+
+<script src="../js/nav.js" defer></script>
+</body>
+</html>

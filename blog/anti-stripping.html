@@ -1,0 +1,330 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Defending Against Watermark Stripping: Content Fingerprints and Error Correction | Oversight Protocol</title>
+  <meta name="description" content="How Oversight v0.4.3 defends against the VM-strip-export attack with ECC-protected synonym bits, winnowing fingerprints, and a 5-phase attribution pipeline.">
+  <meta name="author" content="Zion Boggan">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="../css/style.css">
+</head>
+<body>
+
+<nav class="site-nav">
+  <div class="nav-inner">
+    <a href="../" class="nav-brand"><span>Oversight</span> Protocol</a>
+    <ul class="nav-links">
+      <li><a href="../">Home</a></li>
+      <li><a href="../demo/">Demo</a></li>
+      <li><a href="../viewer/">Inspect</a></li>
+      <li><a href="../docs/">Docs</a></li>
+      <li><a href="../research/">Research</a></li>
+      <li><a href="../blog/" class="active">Blog</a></li>
+      <li><a href="../about.html">About</a></li>
+    </ul>
+  </div>
+</nav>
+
+<main>
+  <div class="container">
+
+    <div class="blog-post-header">
+      <h1>Defending Against Watermark Stripping: Content Fingerprints and Error Correction</h1>
+      <div class="blog-post-meta">2026-04-19 &middot; Zion Boggan &middot; ~12 min read</div>
+    </div>
+
+    <div class="blog-content">
+
+      <p>
+        There is an attack against Oversight that, until v0.4.3, worked perfectly every time.
+        The adversary receives a sealed document. They open it inside an airgapped virtual machine,
+        strip all zero-width Unicode characters with a one-line regex, trim trailing whitespace
+        from every line, and export the result as a clean text file. L1 is gone. L2 is gone. L3
+        was a stub that the pipeline never called. The attribution system returns nothing. The
+        adversary leaks the document with zero forensic trace.
+      </p>
+
+      <p>
+        I call this the VM-strip-export attack, and it is the scenario that motivated the
+        anti-stripping research and the v0.4.3 release. The previous post covers how v0.4.2 wired
+        L3 into the pipeline, closing the stub gap so synonym rotation actually runs. This post
+        covers the next question: what happens when L3 alone is not enough?
+      </p>
+
+      <h2>The research survey</h2>
+
+      <p>
+        Before writing code, I surveyed the watermarking literature to understand what is
+        theoretically possible. The survey covered 19 papers spanning generation-time LLM
+        watermarks (Kirchenbauer et al. 2023, SemaMark, SEMSTAMP, SimMark, DualGuard, SynGuard),
+        attack research (SIRA, which defeats seven watermarking methods by targeting high-entropy
+        tokens), capacity bounds, and a result from NeurIPS 2024 that I kept returning to
+        throughout the implementation.
+      </p>
+
+      <p>
+        That result is the No Free Lunch theorem for LLM watermarking (Pang, Hu, et al., NeurIPS
+        2024). It proves that three properties cannot all be maximized simultaneously: robustness
+        (the watermark survives modification), anti-spoofing (adversaries cannot forge the
+        watermark), and easy detection (detection does not require storing all generated text). You
+        must pick two at the expense of the third. Oversight's threat model is leak attribution,
+        not authenticity proof. Spoofing is a concern (an attacker fabricating a watermarked
+        document to frame another recipient), but robustness is the higher priority. The manifest
+        and Rekor transparency log handle the spoofing risk separately.
+      </p>
+
+      <p>
+        The information-theoretic analysis was sobering. For post-hoc text watermarking (Oversight's
+        case, where we watermark existing documents rather than controlling LLM generation), the
+        channel capacity per synonym instance is <code>log2(K)</code> bits, where K is the number
+        of variants in the class (typically 3, giving about 1.58 bits). Under paraphrasing, each
+        bit is flipped with probability p. At p = 0.1 (light paraphrasing), the Shannon limit
+        gives about 0.53 usable bits per instance, which is comfortable for encoding a 64-bit
+        mark_id across 150 instances. At p = 0.3 (moderate paraphrasing), capacity drops to 0.12
+        bits per instance, requiring 4 or more pages. At p = 0.5, capacity is zero. The watermark
+        is destroyed, and no coding scheme can recover it.
+      </p>
+
+      <p>
+        This tells you exactly where the hard boundary is. For light-to-moderate paraphrasing,
+        error-correcting codes can recover the payload. For aggressive rewriting, the embedded
+        watermark is information-theoretically dead, and you need a different approach entirely.
+      </p>
+
+      <h2>Error correction over synonym bits</h2>
+
+      <p>
+        The v0.4.1 L3 extraction used a crude threshold: if 70% of synonym classes matched, report
+        a match. This worked for unmodified documents but had no mathematical guarantees. A 68%
+        match and a 72% match were treated as categorically different (reject versus accept), even
+        though the difference might be a single word.
+      </p>
+
+      <p>
+        The v0.4.3 ECC module (<code>oversight_core/ecc.py</code>) replaces this with repetition
+        coding. Each bit of the mark_id is encoded across R copies in the synonym stream, with a
+        default of R = 7. Recovery uses majority vote: if 4 or more of the 7 copies agree, the
+        bit is decoded correctly. This tolerates up to 3 errors per 7 copies, or approximately
+        42% bit error rate per individual copy. In practice, errors are not uniformly distributed
+        (paraphrasing tends to cluster changes in specific passages), so the effective tolerance
+        is lower. Empirically, the R = 7 repetition code reliably corrects up to about 12%
+        aggregate bit errors across the full synonym stream.
+      </p>
+
+      <p>
+        Why repetition codes instead of BCH or Reed-Solomon? Simplicity and auditability.
+        Repetition codes have no lookup tables, no Galois field arithmetic, no implementation
+        subtleties that could introduce silent bugs. The decode path is a majority vote, which is
+        three lines of Python. For a research prototype targeting a USENIX Security submission,
+        correctness confidence matters more than coding efficiency. If the capacity bound becomes
+        a bottleneck (it has not yet), upgrading to BCH is a drop-in replacement at the ECC layer
+        without touching the rest of the pipeline.
+      </p>
+
+      <h2>Content fingerprinting</h2>
+
+      <p>
+        Error correction strengthens the embedded watermark, but it cannot save a watermark that
+        has been entirely destroyed. If the adversary paraphrases aggressively enough (or uses an
+        LLM rewriter), every synonym choice is overwritten, and no ECC can recover a signal that
+        no longer exists. This is where content fingerprinting enters.
+      </p>
+
+      <p>
+        The fingerprint module (<code>oversight_core/fingerprint.py</code>) implements two
+        algorithms. The first is winnowing (Schleimer, Wilkerson, and Aiken, SIGMOD 2003), the
+        same algorithm behind Stanford's MOSS plagiarism detector. Winnowing computes rolling
+        hashes over character k-grams (contiguous k-character substrings of the text), then
+        selects a subset of hashes using a minimum-in-window rule. The selected hashes form the
+        document's fingerprint. At detection time, the suspected leak's fingerprint is compared
+        against stored fingerprints using Jaccard similarity. Because winnowing selects
+        position-independent local features, it detects partial copies even when the document is
+        truncated, reordered, or mixed with other text.
+      </p>
+
+      <p>
+        The second algorithm is semantic sentence hashing. Each sentence is reduced to an
+        order-independent set of content-word hashes (nouns, verbs, adjectives, stripped of
+        inflection). This is cruder than winnowing but more robust to minor edits, because
+        changing a single word in a sentence only affects one hash in the set rather than
+        corrupting a k-gram window. The overlap between stored and observed sentence hash sets
+        provides a second similarity score.
+      </p>
+
+      <p>
+        The <code>ContentFingerprint</code> class combines both methods with weighted scoring. The
+        critical property of these fingerprints is that they are not embedded in the document.
+        They are computed at seal time and stored server-side in a <code>.fingerprint.json</code>
+        file alongside each <code>.sealed</code> file. The adversary cannot strip them because
+        they were never in the document to begin with. Even if every watermark layer is destroyed,
+        the fingerprints survive on the server, and the attribution system can compare the leaked
+        text against the stored fingerprints to identify which recipient's copy was the source.
+      </p>
+
+      <h2>The 5-phase attribution pipeline</h2>
+
+      <p>
+        The rewritten <code>attribute</code> command runs five phases in sequence. Each phase
+        uses a different signal source, and each is a fallback for the one before it.
+      </p>
+
+      <p>
+        Phase 1 is direct extraction. The system attempts to read L1, L2, and L3 marks directly
+        from the leaked text. If L1 succeeds, attribution is immediate and high-confidence. If L1
+        fails but L2 partially succeeds, the partial candidate enters the fusion pool. If both
+        fail, L3 synonym extraction produces candidates based on the statistical distribution of
+        word choices.
+      </p>
+
+      <p>
+        Phase 2 is registry query. Any candidates or partial evidence from Phase 1 are checked
+        against the Oversight registry. The registry stores every mark_id that has been issued,
+        along with the recipient's public key hash and the file's content hash. A partial L2
+        candidate that matches a registered mark is stronger evidence than one with no registry
+        corroboration.
+      </p>
+
+      <p>
+        Phase 3 is L3 verification. For each candidate mark_id (from Phase 1 or Phase 2), the
+        system tests whether the leaked text's synonym choices are consistent with that mark.
+        The <code>verify_l3()</code> function supports both the older 27-class dictionary (v1)
+        and the current 151-class dictionary (v2), so it can attribute documents sealed under
+        earlier versions of Oversight.
+      </p>
+
+      <p>
+        Phase 4 is Bayesian fusion. All candidates from the preceding phases are combined using
+        the independence-assumption formula (<code>1 - product(1 - s_i)</code>). The output is a
+        ranked list of mark_ids with fused confidence scores and per-layer attribution. The top
+        candidate is the system's best guess at the leaker's identity.
+      </p>
+
+      <p>
+        Phase 5 is fingerprint comparison, triggered by the <code>--fingerprints</code> CLI flag.
+        If Phases 1 through 4 fail to produce a high-confidence attribution (or if the operator
+        wants independent confirmation), the system loads the stored
+        <code>.fingerprint.json</code> files for all recipients of the document and computes
+        winnowing Jaccard similarity and sentence hash overlap against the leaked text. The
+        recipient whose fingerprint is closest to the leak is the likely source, even if every
+        embedded watermark has been destroyed.
+      </p>
+
+      <h2>What the fingerprint database can and cannot do</h2>
+
+      <p>
+        The fingerprint database is the last line of defense, and it is important to be precise
+        about its limitations. Winnowing fingerprints detect near-verbatim copies. If the
+        adversary copies the text faithfully (even after stripping all formatting-level marks),
+        the k-gram fingerprints will match at high confidence. If the adversary paraphrases
+        moderately, winnowing similarity degrades but sentence hashing may still find matches
+        because sentence-level content words are preserved. If the adversary rewrites the document
+        heavily using an LLM, both fingerprint methods degrade, and attribution confidence drops
+        into a range where it is suggestive but not forensic.
+      </p>
+
+      <p>
+        The fundamental constraint is that fingerprints answer the question "which copy is this
+        text closest to?" rather than "which copy did this text come from?" In a leak scenario
+        with two recipients whose copies differ by only a few synonym choices, the fingerprint
+        similarity scores for both recipients will be very close. Per-recipient attribution in
+        that case depends on the embedded watermarks (which differentiate the copies precisely)
+        rather than on fingerprints (which measure bulk similarity).
+      </p>
+
+      <p>
+        The fingerprint database is most valuable when the watermarks are destroyed but the text
+        is copied near-verbatim. The VM-strip-export attack is exactly this scenario: the
+        adversary strips formatting artifacts but does not change the words. Winnowing catches
+        this cleanly.
+      </p>
+
+      <h2>Honest limitations</h2>
+
+      <p>
+        I want to state plainly what Oversight v0.4.3 cannot defend against. LLM paraphrasing
+        defeats all embedded watermarks. The SIRA attack (Cheng et al., ICML 2025) achieves
+        nearly 100% success against seven recent watermarking methods by identifying and replacing
+        high-entropy tokens, which are precisely the tokens most likely to carry watermark signal.
+        This is not a weakness specific to Oversight; it is a fundamental property of text
+        watermarking. Watermarks embed information in the choices an author makes, and a
+        sufficiently powerful rewriter can overwrite every one of those choices.
+      </p>
+
+      <p>
+        The USENIX Security 2025 paper on ECC-protected watermarks proves that bounded robustness
+        is achievable: if the adversary's edit distance is below a threshold epsilon, detection
+        succeeds with probability at least 1 minus delta. But if the adversary exceeds that
+        threshold, all bets are off. Shannon's channel capacity theorem sets a hard floor. At a
+        50% bit-flip rate, the capacity of the binary symmetric channel is zero. No coding scheme
+        recovers information from pure noise.
+      </p>
+
+      <p>
+        The fingerprint database is the fallback for the regime where watermarks fail. It shifts
+        the problem from "recover the embedded mark" to "match the leaked text against stored
+        copies." This works for near-verbatim leaks and degrades gradually for paraphrased leaks.
+        For a full hostile rewrite (where the adversary understands the content and restates it
+        entirely in their own words), neither watermarks nor fingerprints provide reliable
+        attribution. At that point, you are in the domain of canary traps (embedding unique facts
+        per recipient) and traditional leak investigation.
+      </p>
+
+      <p>
+        I prefer to state these limits explicitly rather than imply that Oversight is undefeatable.
+        The goal has never been to make leaking impossible. The goal is to raise the cost.
+        Stripping invisible characters used to take one regex and ten seconds. Now it requires
+        the adversary to also paraphrase every sentence, which takes time, introduces factual
+        errors, and produces a derivative work that itself may be identifiable through other means.
+        That is a meaningful improvement in the threat model, even if it is not a complete solution.
+      </p>
+
+      <h2>What the research says about the ceiling</h2>
+
+      <p>
+        The capacity bounds paper ("We Can Hide More Bits," 2024) found that current practical
+        systems achieve far less than the theoretical maximum, but the theoretical maximum itself
+        is constrained for post-hoc watermarking. Oversight's realistic capacity is 30 to 80 bits
+        per page of prose using synonym and structural methods. A 64-bit mark_id needs roughly one
+        page to encode with redundancy. With ECC, the same page can tolerate moderate noise while
+        still recovering the payload.
+      </p>
+
+      <p>
+        The best achievable resilience, based on the literature survey, looks like this: against
+        normalization (stripping invisible characters and whitespace), semantic marks survive at
+        100%. Against light manual paraphrasing, synonym rotation with ECC achieves 80 to 90%
+        detection. Against LLM paraphrasing (SIRA-class attacks), the combination of ECC,
+        redundancy, and the fingerprint database achieves 40 to 60% detection. Against a faithful
+        screenshot-and-retype, synonym marks alone achieve over 90% detection. Against full hostile
+        rewriting, nothing embedded in the text survives.
+      </p>
+
+      <p>
+        These numbers are derived from the literature and from my own testing against the
+        Oversight test suite. They are honest estimates, not marketing claims. The research
+        community has been converging on a shared understanding: text watermarking is a
+        defense-in-depth problem with diminishing returns against increasingly sophisticated
+        adversaries. Oversight's contribution is not a novel watermarking algorithm. It is the
+        engineering of a multi-layer system that degrades gracefully, provides diagnostic
+        transparency about why attribution failed, and falls back to server-side fingerprints
+        as a last resort.
+      </p>
+
+    </div>
+  </div>
+</main>
+
+<footer class="site-footer">
+  <div class="container">
+    <p>Oversight Protocol &copy; 2026 Zion Boggan. Apache 2.0 License.</p>
+    <p style="color:var(--text-muted);font-size:13px;">Co-authored with Claude Opus 4.6 and 4.7 (Anthropic).</p>
+    <p><a href="https://github.com/oversight-protocol/oversight">GitHub</a></p>
+  </div>
+</footer>
+
+<script src="../js/nav.js" defer></script>
+</body>
+</html>

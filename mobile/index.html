@@ -1,0 +1,247 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Mobile Verifier | Oversight Protocol</title>
+  <meta name="description" content="The Oversight mobile verifier is a Flutter app on top of the same Rust verification core as the desktop CLI. Verify Oversight-attested documents from a phone with no accounts, no telemetry, and no server in the middle.">
+  <meta name="author" content="Zion Boggan">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="../css/style.css">
+  <style>
+    .status-table { width: 100%; border-collapse: collapse; font-size: 14px; margin: 16px 0; }
+    .status-table th, .status-table td {
+      text-align: left; padding: 10px 12px; border-bottom: 1px solid var(--border); vertical-align: top;
+    }
+    .status-table th { color: var(--text-muted); font-weight: 500; }
+    .status-table td { color: var(--text-primary); }
+    .status-pill {
+      display: inline-block; padding: 2px 8px; border-radius: 4px;
+      font-size: 12px; font-weight: 600; letter-spacing: 0.02em;
+    }
+    .status-pill.live { background: rgba(60, 180, 100, 0.12); color: #5ad19a; }
+    .status-pill.planned { background: rgba(180, 180, 180, 0.12); color: var(--text-secondary); }
+  </style>
+</head>
+<body>
+
+<nav class="site-nav">
+  <div class="nav-inner">
+    <a href="../" class="nav-brand"><span>Oversight</span> Protocol</a>
+    <ul class="nav-links">
+      <li><a href="../">Home</a></li>
+      <li><a href="../demo/">Demo</a></li>
+      <li><a href="../viewer/">Inspect</a></li>
+      <li><a href="../docs/">Docs</a></li>
+      <li><a href="../research/">Research</a></li>
+      <li><a href="../blog/">Blog</a></li>
+      <li><a href="../about.html">About</a></li>
+    </ul>
+  </div>
+</nav>
+
+<main>
+  <div class="container">
+
+    <div class="page-header">
+      <h1>Mobile Verifier</h1>
+      <p class="subtitle">Cryptographically verifiable data provenance, on a phone</p>
+    </div>
+
+    <p>
+      The Oversight mobile verifier is the companion app for the desktop CLI. It opens a sealed
+      file, scans a QR code, or accepts a hash, and tells the recipient whether the manifest
+      signature is valid, whether the inclusion proof in the public Sigstore Rekor log checks
+      out, and what the manifest says about who issued the document and to whom. The verification
+      core is the same Rust workspace that powers the desktop CLI, embedded into the Flutter app
+      via <a href="https://github.com/fzyzcjy/flutter_rust_bridge"><code>flutter_rust_bridge</code></a>.
+      A manifest that opens on a laptop opens the same way on a phone, with the same answer.
+    </p>
+
+    <p>
+      The repository is at
+      <a href="https://github.com/oversight-protocol/oversight-mobile">oversight-protocol/oversight-mobile</a>.
+      Apache 2.0, same as the protocol.
+    </p>
+
+    <h2>Status</h2>
+
+    <table class="status-table">
+      <thead>
+        <tr><th>Platform</th><th>Channel</th><th>Status</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>iOS</td>
+          <td>TestFlight (internal)</td>
+          <td><span class="status-pill live">Live</span> v0.1.11</td>
+        </tr>
+        <tr>
+          <td>Android</td>
+          <td>Internal track / debug APK</td>
+          <td><span class="status-pill live">Live</span> v0.1.11</td>
+        </tr>
+        <tr>
+          <td>iOS</td>
+          <td>App Store (external)</td>
+          <td><span class="status-pill planned">Pending</span> after internal beta passes external review</td>
+        </tr>
+        <tr>
+          <td>Android</td>
+          <td>Google Play</td>
+          <td><span class="status-pill planned">Pending</span> after internal beta</td>
+        </tr>
+        <tr>
+          <td>Android (no Google)</td>
+          <td>F-Droid</td>
+          <td><span class="status-pill planned">Planned</span></td>
+        </tr>
+        <tr>
+          <td>Anyone</td>
+          <td>GitHub Releases (<code>.apk</code> + reproducible build manifest)</td>
+          <td><span class="status-pill planned">Planned</span></td>
+        </tr>
+      </tbody>
+    </table>
+
+    <p>
+      The internal beta is closed (single-tester) while the project shakes out platform-specific
+      issues. External TestFlight invitations open after the iOS 26 SDK migration settles and the
+      export-compliance metadata is clean. The detailed write-up of how the build pipeline got
+      there, including the Apple-side gotcha that hides every TestFlight build until the
+      <code>ITSAppUsesNonExemptEncryption</code> key is set, is at
+      <a href="../blog/mobile-beta.html">Mobile beta is live</a>.
+    </p>
+
+    <h2>What it does</h2>
+
+    <p>
+      The mobile verifier accepts an Oversight artifact in three forms. A QR code that encodes
+      the manifest fingerprint, a typed or pasted hash, or an actual <code>.oversight</code>
+      bundle opened from the device's file picker. From any of those inputs it parses the
+      manifest, verifies the issuer's Ed25519 signature, fetches the corresponding inclusion
+      proof from the Sigstore Rekor public transparency log, and checks the proof against the
+      log's signed tree head. The output is a binary verdict (valid or invalid) plus the
+      manifest fields a recipient cares about: who issued the document, to whom, when, with
+      what algorithm suite, and what watermarks and beacons it carries.
+    </p>
+
+    <p>
+      Three things the app does not do. There is no account system, so there is nothing to log
+      in to and nothing the project knows about who is verifying what. There is no telemetry or
+      analytics SDK, so verification activity stays on the device. There is no Oversight server
+      in the verification path; the only network call the app makes is to the public Rekor log
+      operated by Sigstore, which any third party can also query. The cryptography happens on
+      the device, against a public append-only log that anyone can audit.
+    </p>
+
+    <h2>What it is not</h2>
+
+    <p>
+      The mobile verifier is verification only. Sealing documents from a phone is a v2 feature
+      that depends on hardware-backed keys (Secure Enclave on iOS, StrongBox on Android) and is
+      not in the v1 scope. If a sender wants to seal from a mobile context today, the desktop
+      CLI is the supported path and the mobile verifier is what their recipient uses on the
+      other end.
+    </p>
+
+    <p>
+      The app is not free of platform middlemen. Apple controls the App Store, Google controls
+      Play, and any update through those channels passes through their review and signing
+      processes. That is a structural property of mobile distribution and not something the
+      project can talk its way out of. The mitigations are F-Droid for Android and a direct
+      <code>.apk</code> on GitHub Releases with a reproducible-build manifest, both planned.
+    </p>
+
+    <p>
+      The app is not a claim of perfect security. No mobile application is. What it is, is an
+      open verifier whose source is published, whose verification core is the same code that
+      runs on the desktop, and whose dependencies are auditable. If something is wrong, it is
+      wrong in public.
+    </p>
+
+    <h2>Architecture</h2>
+
+    <p>
+      The UI layer is Flutter (Dart), single codebase across both platforms. The verification
+      core is the existing <code>oversight-rust</code> workspace, embedded via
+      <code>flutter_rust_bridge</code> and called from Dart through a generated FFI shim. There
+      is no second implementation of Rekor proof verification, no second implementation of
+      manifest signature checks, and no second copy of the canonical algorithm suites. Whatever
+      passes the desktop conformance tests passes the mobile build, because both compile from
+      the same Rust source. The most likely failure mode for a mobile verifier is to drift out
+      of sync with the canonical implementation; that class of bug is structurally impossible
+      with this architecture.
+    </p>
+
+    <p>
+      The iOS pipeline runs entirely on GitHub-hosted macOS runners (<code>macos-26</code>,
+      Xcode 26, iOS 26 SDK). The project does not require an Apple workstation to ship.
+      Signing certificates live in encrypted Actions secrets, and every build operation declares
+      every input explicitly so the workflow is reproducible from the source repository.
+      Android builds run both locally and on CI; release AABs are signed with an upload keystore
+      held outside the repository.
+    </p>
+
+    <h2>Reproducible builds and the trust model</h2>
+
+    <p>
+      Mobile distribution forces a question that desktop distribution can mostly avoid: how does
+      a recipient know the binary they install is the binary the source says it is? The honest
+      answer for stores is that they do not, beyond trusting Apple and Google. The trustless
+      answer is reproducible builds. The plan is to ship a build manifest with every tagged
+      release on GitHub: clone the repo, check out the tag, run one command, and confirm the
+      resulting binary is byte-identical to what is on F-Droid or in the GitHub Releases
+      <code>.apk</code> attachment. If the hashes match, the published binary contains exactly
+      the code the repository contains, with no additional surprises.
+    </p>
+
+    <p>
+      Reproducible builds are not yet live. Until they are, the most defensible fallback is the
+      source itself: every release is tagged, every tag has a matching CI run, and every CI run
+      uploads its artifacts. The workflows live under
+      <a href="https://github.com/oversight-protocol/oversight-mobile/tree/main/.github/workflows"><code>.github/workflows/</code></a>
+      and are auditable by anyone.
+    </p>
+
+    <h2>Get the beta</h2>
+
+    <p>
+      The fastest way to track the project is to watch the
+      <a href="https://github.com/oversight-protocol/oversight-mobile">repository</a>. Tagged
+      releases land there first, with attached build artifacts and notes. External TestFlight
+      invitations open after the iOS 26 SDK migration settles. Android internal-track access
+      and a debug APK are available on request through GitHub once the second-tester slot opens.
+    </p>
+
+    <p>
+      Build documentation for anyone who wants to compile the app from source today lives at
+      <a href="https://github.com/oversight-protocol/oversight-mobile/blob/main/docs/BUILD.md"><code>docs/BUILD.md</code></a>.
+      Both the iOS and Android pipelines are documented end-to-end, including the toolchain
+      versions and the cross-compile targets. The 32-bit Android targets (armv7, i686) require
+      the desktop CLI's Rust core at v0.4.8 or later, since that release ships the
+      <code>MAX_CIPHERTEXT_BYTES</code> portability fix the mobile build depends on.
+    </p>
+
+    <p>
+      <a href="https://github.com/oversight-protocol/oversight-mobile" class="btn btn-primary">Source on GitHub</a>
+      <a href="../blog/mobile-beta.html" class="btn btn-secondary" style="margin-left:8px;">Mobile beta write-up</a>
+      <a href="https://github.com/oversight-protocol/oversight" class="btn btn-secondary" style="margin-left:8px;">Desktop protocol repo</a>
+    </p>
+
+  </div>
+</main>
+
+<footer class="site-footer">
+  <div class="container">
+    <p>Oversight Protocol &copy; 2026 Zion Boggan. Apache 2.0 License.</p>
+    <p style="color:var(--text-muted);font-size:13px;">Co-authored with Claude Opus 4.6 and 4.7 (Anthropic).</p>
+    <p><a href="https://github.com/oversight-protocol/oversight">GitHub</a> &middot; <a href="https://github.com/oversight-protocol/oversight-mobile">Mobile</a></p>
+  </div>
+</footer>
+
+<script src="../js/nav.js" defer></script>
+</body>
+</html>

@@ -1,0 +1,182 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Roadmap | Oversight Protocol</title>
+  <meta name="description" content="Oversight Protocol roadmap: L3 safety first, then web viewer, Outlook add-in, design-partner deployment, SOC 2 Type 1 scoping, and a public launch gated on non-technical usability.">
+  <meta name="author" content="Zion Boggan">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="../css/style.css">
+</head>
+<body>
+
+<nav class="site-nav">
+  <div class="nav-inner">
+    <a href="../" class="nav-brand"><span>Oversight</span> Protocol</a>
+    <ul class="nav-links">
+      <li><a href="../">Home</a></li>
+      <li><a href="../demo/">Demo</a></li>
+      <li><a href="../viewer/">Inspect</a></li>
+      <li><a href="../docs/" class="active">Docs</a></li>
+      <li><a href="../research/">Research</a></li>
+      <li><a href="../blog/">Blog</a></li>
+      <li><a href="../about.html">About</a></li>
+    </ul>
+  </div>
+</nav>
+
+<main>
+  <div class="container">
+    <div class="page-header">
+      <h1>Roadmap</h1>
+      <p class="subtitle">Launch gated on product usability and threat-model honesty</p>
+    </div>
+
+    <p style="color:var(--text-muted);font-size:14px;">
+      Zion Boggan &middot; Updated April 2026 &middot; Oversight Protocol v0.4.5
+    </p>
+
+    <p>
+      This page mirrors the public roadmap in
+      <a href="https://github.com/oversight-protocol/oversight/blob/main/docs/ROADMAP.md">docs/ROADMAP.md</a>
+      and supersedes any earlier timeline. The source of truth is the repository; this page is
+      kept in sync so visitors can read the current plan without leaving the site.
+    </p>
+
+    <h2 id="correction">April 20, 2026 correction</h2>
+    <p>
+      The launch plan is now gated on product usability and threat-model honesty, not on a
+      calendar date. The headline changes:
+    </p>
+    <ol>
+      <li>
+        <strong>L3 safety fixes and collusion documentation</strong> shipped in v0.4.5. L3
+        defaults off for wording-sensitive document classes, requires explicit disclosure when
+        enabled, records <code>canonical_content_hash</code> in the manifest, and supports a
+        boilerplate-only mode for contracts and filings.
+      </li>
+      <li>
+        <strong>Web viewer and drag-drop share UI</strong> is the next website and product
+        milestone. No broad HN or Reddit launch while the only supported interface is a CLI.
+        Non-technical recipients have to be able to open and inspect Oversight files before a
+        public launch is honest. <span class="badge badge-green">Inspector shipped</span>
+        <span class="badge badge-blue">Decrypt pending</span>
+        The <a href="../viewer/">browser inspector</a> parses <code>.sealed</code> files,
+        verifies the Ed25519 signature via WebCrypto, and optionally resolves provenance
+        against the registry declared in the manifest. In-browser decryption via libsodium.js
+        (X25519 + XChaCha20-Poly1305) is the follow-up milestone.
+      </li>
+      <li>
+        <strong>Outlook add-in first</strong> for the first ecosystem integration. Drive,
+        Box, SharePoint, and Teams plugins are deferred until there is a maintainer or design
+        partner paying for them.
+      </li>
+      <li>
+        <strong>SIEM integration before SOC 2.</strong> Splunk HEC, Microsoft Sentinel, and
+        Elastic Common Schema exports are prioritized because they are fast to ship and
+        high-ROI for enterprise evaluators. <span class="badge badge-green">Shipped in v0.4.6</span>
+        Formatters, the <code>oversight siem export</code> CLI, and the operator guide
+        live at
+        <a href="https://github.com/oversight-protocol/oversight/blob/main/docs/SIEM.md"><code>docs/SIEM.md</code></a>.
+      </li>
+      <li>
+        <strong>SOC 2 Type 1 scoping</strong> becomes realistic after a design partner
+        engagement. ISO 27001 follows SOC 2. <strong>FedRAMP is dropped from near-term
+        planning</strong>; it is a multi-year commercial program requiring sponsor-agency
+        backing, and Oversight has not earned that yet.
+      </li>
+      <li>
+        <strong>Registry federation.</strong> Publish and harden
+        <a href="https://github.com/oversight-protocol/oversight/blob/main/docs/spec/registry-v1.md"><code>docs/spec/registry-v1.md</code></a>
+        during the Rust Axum and SQLx registry work so a second operator can run a compatible
+        registry. <span class="badge badge-green">Hardened in v0.4.7</span>
+        Spec aligned with the reference server, and a conformance harness at
+        <code>tests/test_registry_conformance.py</code> exercises every endpoint. An operator
+        runs it with
+        <code>OVERSIGHT_REGISTRY_URL=https://registry.example.org python3 tests/test_registry_conformance.py</code>
+        to claim v1 compatibility. The Rust Axum port remains the v1.0 prerequisite.
+      </li>
+    </ol>
+
+    <h2 id="sequence">Public launch sequence</h2>
+    <ol>
+      <li>L3 safety and collusion documentation. <span class="badge badge-green">Shipped in v0.4.5</span></li>
+      <li>Browser inspector and drag-drop share workflow.
+        <span class="badge badge-green">Inspector + classic decrypt shipped</span>
+        <span class="badge badge-blue">Hybrid decrypt pending</span></li>
+      <li>Outlook add-in. <span class="badge badge-blue">Next</span></li>
+      <li>One regulated-industry design-partner deployment.</li>
+      <li>SOC 2 Type 1 scoping, in parallel with the design partner.</li>
+      <li>Public launch. Not before steps 3 and 4.</li>
+    </ol>
+
+    <h2 id="shipped">Already shipped</h2>
+    <ul>
+      <li><strong>v0.3:</strong> RFC 3161 qualified timestamps with FreeTSA primary and DigiCert fallback.</li>
+      <li><strong>v0.4:</strong> Rust canonical port of the hot path with cross-language conformance.</li>
+      <li><strong>v0.4.4:</strong> Nine security findings resolved under fail-closed discipline, including DNS event shared-secret auth.</li>
+      <li><strong>v0.4.5:</strong> L3 semantic watermark safety, <code>canonical_content_hash</code> and <code>l3_policy</code> in the manifest, and the Tkinter GUI starter.</li>
+      <li><strong>v0.5:</strong> Sigstore Rekor v2 transparency log integration with DSSE envelopes and hashed recipient keys.</li>
+      <li><strong>v0.4.6:</strong> SIEM export for Splunk HEC, Microsoft Sentinel, and Elastic Common Schema, with the <code>oversight siem export</code> CLI and <code>docs/SIEM.md</code> operator guide.</li>
+      <li><strong>v0.4.7:</strong> Registry v1 interop spec hardened against the reference server and a 33-check federation conformance harness (<code>tests/test_registry_conformance.py</code>). CORS middleware deployed so the browser inspector can read public endpoints.</li>
+      <li><strong>Browser inspector:</strong> static <a href="../viewer/">viewer/</a> page with drag-drop <code>.sealed</code> parsing, WebCrypto Ed25519 verification, canonical-JSON matching Python byte-for-byte, and optional registry lookup.</li>
+      <li><strong>Classic-suite in-browser decrypt:</strong> WebCrypto X25519 + HKDF-SHA256 with a vendored pinned copy of <code>@noble/ciphers</code> for XChaCha20-Poly1305. Post-decrypt SHA-256 check against <code>manifest.content_hash</code>; wrong key, recipient mismatch, and tampered ciphertext all fail loudly.</li>
+      <li><strong>Opsec hygiene:</strong> <code>scripts/opsec-scan.sh</code>, <code>.github/workflows/opsec.yml</code>, pre-commit hook, and <code>.gitignore</code> rules that block the handoff-note filename patterns from landing in public history. Retroactive history rewrite cleared earlier leaks.</li>
+    </ul>
+
+    <h2 id="near-term">Near-term</h2>
+    <ul>
+      <li>Hybrid (post-quantum) decrypt in the browser. ML-KEM-768 decapsulation alongside X25519; candidate path is a wasm build of <code>liboqs</code>.</li>
+      <li>Outlook add-in. First ecosystem integration; the inspector already covers the open path.</li>
+      <li>Hardware <code>KeyProvider</code> integration in Rust (YubiKey, Nitrokey, OnlyKey) with <code>docs/HARDWARE_KEYS.md</code> as the vendor-neutral setup guide.</li>
+      <li>Rust Axum registry: integration testing and migration tooling; the conformance harness is the acceptance gate.</li>
+      <li>arXiv preprint (~15 pages, <code>cs.CR</code>).</li>
+      <li>Threat model document in the repository (companion to <code>docs/security.md</code>).</li>
+    </ul>
+
+    <h2 id="mid-term">Mid-term</h2>
+    <ul>
+      <li>IETF Internet-Draft submission and informal BoF presentation at CFRG or a relevant security working group.</li>
+      <li>USENIX Security Cycle 2 paper submission.</li>
+      <li>Black Hat Europe 2026 CFP.</li>
+      <li>ACSAC 2026.</li>
+    </ul>
+
+    <h2 id="2027">2027</h2>
+    <ul>
+      <li>Independent security audit (Trail of Bits, NCC Group, Cure53, or Zellic are candidates).</li>
+      <li>v1.0 release, spec freeze, and RFC shepherding.</li>
+      <li>Black Hat USA 2027 Briefings submission.</li>
+    </ul>
+
+    <h2 id="dropped">Explicitly dropped or deferred</h2>
+    <ul>
+      <li><strong>FedRAMP:</strong> dropped from near-term planning. Multi-year program requiring sponsor-agency backing.</li>
+      <li><strong>Cloud-TEE key custody:</strong> dropped in favor of hardware security keys. Ties Oversight to a single cloud vendor and contradicts the open-source goal.</li>
+      <li><strong>Drive, Box, SharePoint, Teams plugins:</strong> deferred until there is a maintainer or design partner funding them.</li>
+      <li><strong>Broad public launch:</strong> not while the only interface is a CLI.</li>
+    </ul>
+
+    <p style="color:var(--text-muted);font-size:14px;">
+      For the authoritative, always-current version of this plan, see
+      <a href="https://github.com/oversight-protocol/oversight/blob/main/docs/ROADMAP.md"><code>docs/ROADMAP.md</code></a>
+      in the repository.
+    </p>
+
+  </div>
+</main>
+
+<footer class="site-footer">
+  <div class="container">
+    <p>Oversight Protocol &copy; 2026 Zion Boggan. Apache 2.0 License.</p>
+    <p style="color:var(--text-muted);font-size:13px;">Co-authored with Claude Opus 4.6 and 4.7 (Anthropic).</p>
+    <p><a href="https://github.com/oversight-protocol/oversight">GitHub</a></p>
+  </div>
+</footer>
+
+<script src="../js/nav.js" defer></script>
+</body>
+</html>

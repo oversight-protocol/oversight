@@ -1,0 +1,273 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>v0.4.4: Nine Security Findings and the Discipline of Failing Closed | Oversight Protocol</title>
+  <meta name="description" content="Codex (GPT-5.4) reviewed the Oversight codebase and found 9 security issues. This post documents what was found and fixed, from TOCTOU races to silent fallbacks.">
+  <meta name="author" content="Zion Boggan">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="../css/style.css">
+</head>
+<body>
+
+<nav class="site-nav">
+  <div class="nav-inner">
+    <a href="../" class="nav-brand"><span>Oversight</span> Protocol</a>
+    <ul class="nav-links">
+      <li><a href="../">Home</a></li>
+      <li><a href="../demo/">Demo</a></li>
+      <li><a href="../viewer/">Inspect</a></li>
+      <li><a href="../docs/">Docs</a></li>
+      <li><a href="../research/">Research</a></li>
+      <li><a href="../blog/" class="active">Blog</a></li>
+      <li><a href="../about.html">About</a></li>
+    </ul>
+  </div>
+</nav>
+
+<main>
+  <div class="container">
+
+    <div class="blog-post-header">
+      <h1>v0.4.4: Nine Security Findings and the Discipline of Failing Closed</h1>
+      <div class="blog-post-meta">2026-04-20 &middot; Zion Boggan &middot; ~10 min read</div>
+    </div>
+
+    <div class="blog-content">
+
+      <p>
+        I asked Codex (GPT-5.4, OpenAI) to audit the Oversight codebase. It found nine security
+        issues. Some were subtle, some were embarrassing, and all of them shared a common pattern:
+        the code chose to continue rather than stop when something went wrong. This post documents
+        each finding, the fix, and the principle that ties them together.
+      </p>
+
+      <p>
+        Transparency about vulnerabilities is part of Oversight's identity. A provenance protocol
+        that hides its own security bugs has no business asking anyone to trust it. Every issue
+        described here has been fixed in v0.4.4, and the commits are public. This review was
+        conducted by Codex (GPT-5.4, OpenAI), working alongside Claude Opus 4.6 and 4.7
+        (Anthropic). The findings are theirs; the fixes and editorial judgment are mine.
+      </p>
+
+      <h2>The max_opens TOCTOU race</h2>
+
+      <p>
+        The <code>max_opens</code> field in a sealed container limits how many times a recipient
+        can open it. The intent is a self-destructing document: after N successful opens, the
+        content becomes permanently inaccessible. The bug was in when the counter incremented.
+        Prior to v0.4.4, the open count was consumed at the start of the decryption attempt,
+        before the key was validated. A failed decryption (wrong key, corrupted ciphertext,
+        anything) still burned one of the recipient's allowed opens.
+      </p>
+
+      <p>
+        The attack is straightforward. An adversary who knows the recipient's sealed file (but
+        not their private key) sends repeated open requests with garbage keys. Each attempt fails
+        decryption but succeeds at consuming an open count. After N attempts, the legitimate
+        recipient is locked out permanently, having never accessed the content. The adversary
+        never reads a single byte but achieves a denial-of-service against the recipient's
+        access rights.
+      </p>
+
+      <p>
+        This is a textbook time-of-check-to-time-of-use (TOCTOU) error. The check ("is the
+        open count below max_opens?") and the use ("increment the counter") happened at the
+        wrong point in the sequence. The fix moves the counter increment to after successful
+        decryption and MAC verification. If decryption fails, the counter does not change. Only
+        a genuine, authenticated open consumes a count.
+      </p>
+
+      <h2>Windows policy counter: POSIX assumptions and silent fallbacks</h2>
+
+      <p>
+        Oversight's policy engine tracks state (open counts, expiration, revocation status) in
+        a local counter file. <code>LOCAL_ONLY</code> mode protects concurrent access to this
+        file using POSIX <code>fcntl</code> advisory locking. The problem: <code>fcntl</code>
+        does not exist on Windows. The Python <code>fcntl</code> module raises
+        <code>ImportError</code> on Windows, and the original code caught this exception
+        silently, proceeding without any file lock at all. On Windows, two concurrent processes
+        could both read the counter, both decide they had opens remaining, and both increment,
+        resulting in more opens than <code>max_opens</code> should permit.
+      </p>
+
+      <p>
+        The fix replaces the POSIX-specific locking with a cross-platform approach: <code>msvcrt.locking()</code>
+        on Windows, <code>fcntl.flock()</code> on POSIX. The abstraction lives in a single
+        lock-acquisition function that dispatches based on <code>sys.platform</code>, so the
+        rest of the policy engine never thinks about platform differences.
+      </p>
+
+      <p>
+        The second issue in this area was worse. <code>REGISTRY</code> and <code>HYBRID</code>
+        policy modes are supposed to check a remote registry server for revocation and open
+        counts, providing centralized control. When the registry was unreachable (network error,
+        DNS failure, server down), both modes silently fell back to local state, behaving
+        identically to <code>LOCAL_ONLY</code>. This is exactly wrong. If an administrator
+        revokes a document via the registry and the recipient's machine cannot reach the
+        registry, the old code would happily open the revoked document using stale local state.
+        The fallback converted a security control into a suggestion.
+      </p>
+
+      <p>
+        Now, <code>REGISTRY</code> mode fails closed: if the registry is unreachable, the open
+        is denied. <code>HYBRID</code> mode uses local state as a cache but refuses to open if
+        the local state is older than a configurable staleness threshold, defaulting to 24 hours.
+        If you cannot confirm that the document has not been revoked, you do not get to open it.
+      </p>
+
+      <h2>Rekor digest verification: checking the envelope but not the contents</h2>
+
+      <p>
+        Oversight logs sealed documents to a Sigstore Rekor transparency log using DSSE (Dead
+        Simple Signing Envelope) format. The <code>verify_inclusion_offline</code> function
+        verified that a valid DSSE envelope existed in the Rekor log, that the envelope's
+        signature was valid, and that the Rekor inclusion proof checked out against the log root.
+        What it did not verify was whether the DSSE envelope's subject digest matched the hash
+        of the file being verified.
+      </p>
+
+      <p>
+        The attack: an adversary takes a legitimately signed DSSE envelope for File A and
+        presents it as the transparency proof for File B. The envelope is real, the signature
+        is valid, the inclusion proof is genuine. But it has nothing to do with File B. The old
+        code accepted this because it never compared the digest inside the envelope against the
+        expected content hash of the file under verification.
+      </p>
+
+      <p>
+        The fix adds an explicit digest comparison step. After verifying the envelope's
+        signature and inclusion proof, the code extracts the subject digest from the DSSE
+        payload and compares it against the SHA-256 hash of the file being verified. If they do
+        not match, verification fails with a clear error identifying both digests. A valid proof
+        for the wrong file is not a valid proof.
+      </p>
+
+      <h2>Registry sidecar validation: trusting unverified input</h2>
+
+      <p>
+        The Oversight registry accepts sidecar data at the <code>/register</code> endpoint:
+        beacon URLs, watermark metadata, and attribution hints that are stored alongside the
+        signed manifest. The manifest itself is signed by the sealer's private key, but the
+        sidecar data was accepted as-is from the HTTP request body without checking whether it
+        matched the signed manifest's contents.
+      </p>
+
+      <p>
+        An attacker who could reach the <code>/register</code> endpoint (which is authenticated
+        but not exclusively so in all deployment configurations) could register a valid manifest
+        with sidecar data pointing to beacons on attacker-controlled infrastructure. When an
+        auditor later queried the registry for beacon URLs, they would receive URLs that the
+        attacker had chosen, potentially redirecting them to a server that logs their queries,
+        serves forged beacon responses, or simply wastes their time.
+      </p>
+
+      <p>
+        The fix validates all sidecar fields against the signed manifest before accepting the
+        registration. Beacon URLs must match the beacon configuration in the manifest. Watermark
+        metadata must be consistent with the manifest's declared watermark layers and parameters.
+        Any mismatch between sidecar data and the signed manifest causes the registration to
+        be rejected with a 400 response, and the discrepancy is logged for auditing.
+      </p>
+
+      <h2>The seal_multi() closure</h2>
+
+      <p>
+        <code>seal_multi()</code> was an experimental function for sealing a document to multiple
+        recipients in a single operation. The implementation used a shared data encryption key
+        (DEK) for all recipients, encrypting the DEK separately under each recipient's public
+        key. The problem was in the manifest: it bound only one recipient's public key hash to
+        the content hash, regardless of how many recipients were specified.
+      </p>
+
+      <p>
+        The consequence is that any recipient could verify the manifest, extract the DEK, and
+        decrypt any other recipient's copy. The per-recipient isolation that the manifest is
+        supposed to enforce did not exist. In a leak investigation, the manifest would identify
+        only one recipient, making attribution ambiguous for multi-recipient seals. Worse, a
+        recipient could plausibly deny being the leaker by pointing out that other recipients
+        had the same DEK.
+      </p>
+
+      <p>
+        The correct fix requires a manifest format that honestly represents multiple recipients,
+        binding each recipient's key hash to the content hash independently and logging each
+        binding separately to the transparency log. That is a nontrivial format change that
+        touches the manifest schema, the Rekor logging path, and the verification logic. Rather
+        than ship a partial fix that might introduce new bugs, I disabled <code>seal_multi()</code>
+        entirely. Calling it raises <code>NotImplementedError</code> with a message pointing to
+        the tracking issue. Single-recipient sealing (called in a loop for multiple recipients)
+        remains the supported path. Each recipient gets their own DEK, their own manifest, and
+        their own Rekor entry.
+      </p>
+
+      <h2>Text format adapter ordering and the empty tlog root</h2>
+
+      <p>
+        Two smaller findings round out the nine. The text format adapter, which handles
+        conversion between Oversight's internal representation and various output formats (plain
+        text, HTML, Markdown), had a processing order dependency. Applying L1 watermarks before
+        format conversion could produce different results than applying them after, because
+        format conversion might strip or alter the zero-width Unicode characters that L1 uses.
+        The fix enforces a deterministic ordering: format conversion first, then L1 embedding,
+        so the watermark is always applied to the final-form text.
+      </p>
+
+      <p>
+        The empty tlog root fix addresses an edge case in the RFC 6962 Merkle tree
+        implementation. When the transparency log contains zero entries, the Merkle root should
+        be the hash of the empty string, per RFC 6962 Section 2.1. The old code returned a
+        zero-filled byte array, which is not the same thing and would cause verification failures
+        if anyone ever checked a root computed over an empty log against the RFC specification.
+        The fix returns <code>SHA-256("")</code> for the empty tree, matching the RFC.
+      </p>
+
+      <h2>The pattern: fail open is fail</h2>
+
+      <p>
+        Every one of these bugs follows the same shape. The code encounters an error condition
+        (wrong key, missing module, unreachable server, empty tree) and instead of stopping,
+        it continues with degraded behavior. In application software, this is often the right
+        choice: a photo editor that crashes when it cannot load a thumbnail is worse than one
+        that shows a placeholder. In security software, the calculus is reversed. A security
+        control that silently degrades is worse than one that loudly refuses, because the
+        degraded state looks identical to the working state from the outside. The user believes
+        they are protected when they are not.
+      </p>
+
+      <p>
+        The principle is simple: security mechanisms must fail closed. If you cannot verify,
+        deny. If you cannot lock, refuse to proceed. If you cannot reach the authority that
+        knows whether a document is revoked, treat it as revoked. The cost of a false denial
+        (the user has to retry or fix their network) is categorically lower than the cost of a
+        false permission (the user opens a revoked document or an attacker exhausts their open
+        count).
+      </p>
+
+      <p>
+        I should have caught these myself. Several of them (the <code>fcntl</code> import, the
+        registry fallback) are patterns I know to watch for. The value of an external review,
+        even an automated one, is that it does not share your blind spots. Codex found what I
+        had normalized. The nine findings are fixed, the tests cover the new behavior, and the
+        codebase is measurably harder to exploit than it was last week. That is the point of
+        the exercise.
+      </p>
+
+    </div>
+  </div>
+</main>
+
+<footer class="site-footer">
+  <div class="container">
+    <p>Oversight Protocol &copy; 2026 Zion Boggan. Apache 2.0 License.</p>
+    <p style="color:var(--text-muted);font-size:13px;">Co-authored with Codex (GPT-5.4, OpenAI), Claude Opus 4.6 and 4.7 (Anthropic).</p>
+    <p><a href="https://github.com/oversight-protocol/oversight">GitHub</a></p>
+  </div>
+</footer>
+
+<script src="../js/nav.js" defer></script>
+</body>
+</html>

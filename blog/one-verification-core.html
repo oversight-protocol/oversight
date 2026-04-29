@@ -1,0 +1,273 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>One Verification Core: How the Desktop and Mobile Share Rust | Oversight Protocol</title>
+  <meta name="description" content="The desktop CLI and the mobile verifier share exactly one verification implementation. v0.4.8 documents the embedding contract, oversight-mobile v0.1.12 switches to a git-plus-tag pin, and a fresh clone of either repo now builds without sibling-checkout choreography.">
+  <meta name="author" content="Zion Boggan">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="../css/style.css">
+</head>
+<body>
+
+<nav class="site-nav">
+  <div class="nav-inner">
+    <a href="../" class="nav-brand"><span>Oversight</span> Protocol</a>
+    <ul class="nav-links">
+      <li><a href="../">Home</a></li>
+      <li><a href="../demo/">Demo</a></li>
+      <li><a href="../viewer/">Inspect</a></li>
+      <li><a href="../docs/">Docs</a></li>
+      <li><a href="../research/">Research</a></li>
+      <li><a href="../blog/" class="active">Blog</a></li>
+      <li><a href="../about.html">About</a></li>
+    </ul>
+  </div>
+</nav>
+
+<main>
+  <div class="container">
+
+    <div class="blog-post-header">
+      <h1>One Verification Core: How the Desktop and Mobile Share Rust</h1>
+      <div class="blog-post-meta">2026-04-29 &middot; Zion Boggan &middot; ~6 min read</div>
+    </div>
+
+    <div class="blog-content">
+
+      <p>
+        A protocol whose desktop tool and mobile tool answer "is this seal valid"
+        with two different code paths is a protocol that can lie to its user in
+        two different ways. From the day I started Oversight, the rule was that
+        verification has exactly one implementation, the Rust core, and every
+        surface that calls it is a thin presentation layer over the same answer.
+        The desktop CLI does that. The browser inspector at
+        <a href="../viewer/">/viewer/</a> does that, with the Rust manifest
+        parser ported to TypeScript and pinned by cross-language conformance.
+        The mobile verifier
+        (<a href="https://github.com/oversight-protocol/oversight-mobile">oversight-protocol/oversight-mobile</a>)
+        does it most directly: the same Rust crates, embedded into the app
+        binary via <a href="https://github.com/fzyzcjy/flutter_rust_bridge"><code>flutter_rust_bridge</code></a>.
+      </p>
+
+      <p>
+        Today I shipped two changes that together turn that rule into a
+        reproducible artifact. <strong>Oversight v0.4.8</strong>'s
+        <a href="https://github.com/oversight-protocol/oversight/blob/main/docs/EMBEDDING.md"><code>docs/EMBEDDING.md</code></a>
+        documents the integration contract for downstream consumers, and
+        <strong>oversight-mobile v0.1.12</strong> switches the Flutter app
+        from sibling-directory path deps to a git-plus-tag pin against
+        that same v0.4.8 release. A fresh clone of the mobile repo now
+        builds without sibling-checkout choreography, and the desktop and
+        mobile binaries are guaranteed to be running identical Rust source.
+        I want to write down why path deps were the right call for
+        development and the wrong call for shipping, what the seven-crate
+        contract actually is, and what this unblocks downstream.
+      </p>
+
+      <h2>Path deps were right until they weren't</h2>
+
+      <p>
+        Until v0.1.12, the mobile repo's <code>rust/Cargo.toml</code> referenced
+        the desktop crates this way:
+      </p>
+
+      <pre><code>oversight-crypto = { path = "../../oversight-gh/oversight-rust/oversight-crypto" }</code></pre>
+
+      <p>
+        That worked because my development machine has both repositories checked
+        out as siblings. Cargo path deps are fast to iterate on; an edit to a
+        crate is visible to the next mobile build with no fetch step. While I was
+        bringing up the Flutter and Rust integration and chasing TestFlight
+        gotchas, the path dep let me change the Rust core and the Flutter wrapper
+        in the same edit cycle, run the iOS build on a GitHub-hosted macOS
+        runner, and see the result without thinking about versions.
+      </p>
+
+      <p>
+        The day the mobile verifier landed on TestFlight as <code>v0.1.11</code>,
+        the path dep started being a liability. Three problems showed up at once.
+        A contributor cloning <code>oversight-mobile</code> alone could not build
+        it; they had to also clone the desktop repo, rename the directory to
+        <code>oversight-gh</code>, and place it as a sibling. The CI workflows
+        worked around this by running <code>git clone --depth 1 ... ../oversight-gh</code>
+        as a hidden step, which kept the build green but obscured the actual
+        dependency graph. And the F-Droid story (reproducible mobile builds
+        anyone can verify against the published binary) requires a stable
+        reference to the Rust core. A path dep resolves to "whatever was sitting
+        next to me at the time," which is the opposite of stable.
+      </p>
+
+      <h2>Seven crates, named exactly</h2>
+
+      <p>
+        The first part of the fix was deciding what "the verification core"
+        actually means. The <code>oversight-rust</code> workspace has eleven
+        crates. Not all of them belong in a verifier binary. The new embedding
+        contract names the seven that do, and the four that do not, in
+        <a href="https://github.com/oversight-protocol/oversight/blob/main/docs/EMBEDDING.md"><code>docs/EMBEDDING.md</code></a>:
+      </p>
+
+      <p>
+        <strong>Verifier-safe (embed these):</strong>
+        <code>oversight-crypto</code> for the X25519, Ed25519,
+        ChaCha20-Poly1305, HKDF-SHA256 primitives;
+        <code>oversight-manifest</code> for manifest parsing, signature
+        verification, and canonicalization;
+        <code>oversight-container</code> for <code>.sealed</code> parsing
+        and authenticated decryption;
+        <code>oversight-tlog</code> for transparency-log proof verification;
+        <code>oversight-rekor</code> for fetching tree heads and inclusion
+        proofs from the Sigstore Rekor v2 public log;
+        <code>oversight-watermark</code> for L1 zero-width and L2
+        whitespace mark detection (read-only);
+        <code>oversight-policy</code> for unseal-time policy evaluation
+        (allow, deny, warn).
+      </p>
+
+      <p>
+        <strong>Not for embedding:</strong> <code>oversight-cli</code>
+        (binary, not a library); <code>oversight-registry</code> (Axum +
+        SQLx server, sender-side and operator-side);
+        <code>oversight-formats</code> (PDF, DOCX, image-LSB watermark
+        application; sender-only and pulls in heavy format dependencies);
+        <code>oversight-semantic</code> (L3 synonym rotation; sender-only;
+        the verifier path uses <code>oversight-watermark</code> for
+        detection only). A downstream embedder reaching for these is
+        probably reaching for the wrong API. The pattern I want is "you
+        embed the verifier and your platform layer; the sender stays on a
+        full desktop install."
+      </p>
+
+      <h2>Git plus tag, not main, not path</h2>
+
+      <p>
+        The second part of the fix was picking a pin pattern. Cargo gives you
+        three options for non-crates.io dependencies: path, git plus branch
+        (or implicit <code>main</code>), and git plus a tag or revision. Path
+        is what we just discussed. Git plus branch is worse than path for
+        production purposes, because the pin moves silently every time the
+        branch advances. Git plus tag is what release engineering should
+        actually look like: every published release is a tag, every tag is a
+        commit, and a Cargo.lock checked in next to the consumer captures the
+        resolved commit so every build on every machine resolves identically.
+      </p>
+
+      <p>
+        The mobile <code>rust/Cargo.toml</code> at v0.1.12 reads:
+      </p>
+
+      <pre><code>oversight-crypto    = { git = "https://github.com/oversight-protocol/oversight.git", tag = "v0.4.8" }
+oversight-manifest  = { git = "https://github.com/oversight-protocol/oversight.git", tag = "v0.4.8" }
+oversight-container = { git = "https://github.com/oversight-protocol/oversight.git", tag = "v0.4.8" }
+oversight-tlog      = { git = "https://github.com/oversight-protocol/oversight.git", tag = "v0.4.8" }
+oversight-rekor     = { git = "https://github.com/oversight-protocol/oversight.git", tag = "v0.4.8" }
+oversight-watermark = { git = "https://github.com/oversight-protocol/oversight.git", tag = "v0.4.8" }
+oversight-policy    = { git = "https://github.com/oversight-protocol/oversight.git", tag = "v0.4.8" }</code></pre>
+
+      <p>
+        Cargo fetches the repository once, resolves all seven entries against
+        the same checkout, and the lock file pins the resolved commit
+        (<code>af6f725c</code> for v0.4.8) so subsequent builds are
+        deterministic. v0.4.8 is the chosen pin because it is the minimum
+        desktop tag that supports 32-bit Android cross-compile; the
+        <code>MAX_CIPHERTEXT_BYTES</code> portability fix that landed in v0.4.8
+        is exactly what unblocks <code>armv7-linux-androideabi</code> and
+        <code>i686-linux-android</code>. Older tags would compile for 64-bit
+        Android and iOS but break the four-ABI Android matrix.
+      </p>
+
+      <h2>What this actually unblocks</h2>
+
+      <p>
+        The clone-and-build story now works without ceremony. A new contributor
+        runs:
+      </p>
+
+      <pre><code>git clone https://github.com/oversight-protocol/oversight-mobile.git
+cd oversight-mobile
+flutter pub get
+flutter run</code></pre>
+
+      <p>
+        and the build succeeds against an attached device or simulator. Cargo
+        fetches the v0.4.8 Rust core during the first compile and caches it
+        like any other git dep. There is no sibling repo, no rename step, no
+        hidden CI workaround. The CI workflows lost a step in the process; both
+        the iOS and Android jobs used to start with
+        <code>git clone --depth 1 https://github.com/oversight-protocol/oversight.git ../oversight-gh</code>
+        as a side channel into the dependency graph, and v0.1.12 deletes both.
+      </p>
+
+      <p>
+        The reproducibility story also gets concrete. A reproducible mobile
+        build needs three things: deterministic source, deterministic toolchains,
+        and deterministic dependency resolution. Source is a git checkout;
+        toolchains are pinned in the workflow's <code>RUST_VERSION</code> and
+        <code>FLUTTER_VERSION</code> environment variables; dependency
+        resolution is now a tag pin plus a committed lock file. The remaining
+        non-determinism is in the build profile (LTO, codegen-units, strip),
+        which the mobile repo has set to deterministic values for some time. A
+        downstream verifier who clones the tagged release, runs the documented
+        build, and compares the resulting binary hash against what is in the
+        GitHub Releases artifact attachment will get an answer that is meaningful.
+        That is the gate F-Droid wants and the gate I want for any user who is
+        skeptical of the App Store binary.
+      </p>
+
+      <p>
+        Bumping the upstream pin became cheap. When v0.4.9 ships, the entire
+        upgrade procedure on the mobile side is a single-line edit to
+        <code>rust/Cargo.toml</code> changing <code>tag = "v0.4.8"</code> to
+        <code>tag = "v0.4.9"</code>, plus a CHANGELOG entry describing what the
+        new core gives the mobile build. There is no CI surgery, no profile
+        review, no "pin to a different branch" coordination. The upgrade is the
+        kind of change a CI bot could open.
+      </p>
+
+      <h2>The same contract works for whatever ships next</h2>
+
+      <p>
+        The blunt reason for documenting this contract upstream rather than
+        treating it as a one-off mobile concern is that mobile is unlikely to
+        be the last embedder. The verifier shape that fits in
+        <code>flutter_rust_bridge</code> also fits in an Electron app over
+        Tauri, in a browser via <code>wasm-bindgen</code>, in a server-side
+        verifier deployed alongside an existing application, and in any
+        third-party tool that wants to confirm a sealed bundle without taking
+        a runtime dependency on the Python reference. The seven-crate split,
+        the v0.4.8-and-up minimum, and the git-plus-tag pin are the same
+        recommendations regardless of who the embedder is. The mobile
+        companion is the worked example; the contract is the project's policy.
+      </p>
+
+      <p>
+        v0.4.8 ships the doc, v0.1.12 ships the proof, and the gap between
+        "the desktop and mobile run the same code" being a slogan and being a
+        verifiable artifact closed today. The integration contract lives at
+        <a href="https://github.com/oversight-protocol/oversight/blob/main/docs/EMBEDDING.md"><code>docs/EMBEDDING.md</code></a>;
+        the worked example is <a href="https://github.com/oversight-protocol/oversight-mobile">oversight-protocol/oversight-mobile</a>;
+        the mobile status page is at <a href="../mobile/">/mobile/</a>. If
+        you are thinking about building a fourth surface on top of the same
+        Rust core, the doc is the place to start, and an issue with your
+        embedder name plus the target triple is welcome.
+      </p>
+
+    </div>
+  </div>
+</main>
+
+<footer class="site-footer">
+  <div class="container">
+    <p>Oversight Protocol &copy; 2026 Zion Boggan. Apache 2.0 License.</p>
+    <p style="color:var(--text-muted);font-size:13px;">Co-authored with Claude Opus 4.6 and 4.7 (Anthropic).</p>
+    <p><a href="https://github.com/oversight-protocol/oversight">GitHub</a> &middot; <a href="https://github.com/oversight-protocol/oversight-mobile">Mobile</a></p>
+  </div>
+</footer>
+
+<script src="../js/nav.js" defer></script>
+</body>
+</html>

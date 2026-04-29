@@ -1,0 +1,103 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>About | Oversight Protocol</title>
+  <meta name="description" content="About Zion Boggan, the security researcher behind the Oversight protocol for data provenance and leak detection.">
+  <meta name="author" content="Zion Boggan">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+
+<nav class="site-nav">
+  <div class="nav-inner">
+    <a href="./" class="nav-brand"><span>Oversight</span> Protocol</a>
+    <ul class="nav-links">
+      <li><a href="./">Home</a></li>
+      <li><a href="demo/">Demo</a></li>
+      <li><a href="viewer/">Inspect</a></li>
+      <li><a href="docs/">Docs</a></li>
+      <li><a href="research/">Research</a></li>
+      <li><a href="blog/">Blog</a></li>
+      <li><a href="about.html" class="active">About</a></li>
+    </ul>
+  </div>
+</nav>
+
+<main>
+  <div class="container">
+    <div class="page-header">
+      <h1>About</h1>
+      <p class="subtitle">The person and motivation behind Oversight</p>
+    </div>
+
+    <h2>Zion Boggan</h2>
+    <p style="color:var(--text-secondary);font-size:15px;">
+      Security researcher &middot; SOC analyst &middot; Bug bounty hunter
+      &middot; <code>artemispwns1</code> on HackerOne and Bugcrowd
+    </p>
+
+    <p>
+      Zion Boggan is a security researcher and bug bounty hunter on HackerOne
+      and Bugcrowd under the handle <strong>artemispwns1</strong>. His focus areas are web application
+      security, authentication bypass, and access control flaws. Oversight started from years of
+      watching public data breaches unfold in real time and realizing that every one of them shared
+      the same gap: once a confidential document left the sender's hands, there was no reliable way
+      to trace it back to the specific recipient who leaked it. That observation turned into a
+      protocol.
+    </p>
+    <p>
+      Oversight is his primary research project. It is an open protocol for cryptographic data
+      provenance, recipient attribution, and leak detection, built because the existing options are
+      all insufficient. DRM is proprietary and brittle. C2PA has no watermarking. Metadata-based
+      provenance disappears the moment someone strips the metadata. Oversight combines authenticated
+      encryption, three-layer watermarking, and transparency logging into a single open spec,
+      implemented in both Python and Rust, released under Apache 2.0, and targeting USENIX
+      Security 2026.
+    </p>
+    <p>
+      Outside of Oversight, Zion programs in Python and Rust, runs a self-hosted Proxmox homelab
+      with local GPU inference and WireGuard VPN, and builds offensive security tooling. All of
+      Oversight's development and testing runs on that homelab infrastructure, against real deployment
+      conditions rather than sanitized CI environments.
+    </p>
+
+    <h2>AI Co-Authorship</h2>
+    <p>
+      Oversight is co-authored with Claude Opus 4.6 and 4.7, Anthropic's large language models.
+      Claude contributes across the full stack: protocol design, cryptographic implementation,
+      Rust and Python code, documentation, website content, and technical writing. Zion directs
+      the architecture, makes all design decisions, and reviews every line that ships.
+      Transparency about AI collaboration is non-negotiable. Pretending this was solo work
+      would be dishonest, and the whole point of Oversight is provenance and attribution.
+    </p>
+
+    <h2>Contact</h2>
+    <p>
+      The best way to reach Zion regarding Oversight is through the project's GitHub organization.
+      Bug reports, feature requests, and protocol-level feedback are all welcome as issues or
+      discussions on the repository.
+    </p>
+    <p>
+      <a href="https://github.com/oversight-protocol" class="btn btn-secondary">GitHub</a>
+      <a href="https://www.linkedin.com/in/zion-boggan/" class="btn btn-secondary" style="margin-left:8px;">LinkedIn</a>
+    </p>
+
+  </div>
+</main>
+
+<footer class="site-footer">
+  <div class="container">
+    <p>Oversight Protocol &copy; 2026 Zion Boggan. Apache 2.0 License.</p>
+    <p style="color:var(--text-muted);font-size:13px;">Co-authored with Claude Opus 4.6 and 4.7 (Anthropic).</p>
+    <p><a href="https://github.com/oversight-protocol/oversight">GitHub</a></p>
+  </div>
+</footer>
+
+<script src="js/nav.js" defer></script>
+</body>
+</html>

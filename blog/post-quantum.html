@@ -1,0 +1,98 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Preparing for Post-Quantum: ML-KEM-768 and Hybrid Key Establishment</title>
+  <meta name="description" content="How Oversight integrates post-quantum cryptography via ML-KEM-768 and ML-DSA-65 in a hybrid key establishment scheme.">
+  <meta name="author" content="Zion Boggan">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="../css/style.css">
+</head>
+<body>
+
+<nav class="site-nav">
+  <div class="nav-inner">
+    <a href="../" class="nav-brand"><span>Oversight</span> Protocol</a>
+    <ul class="nav-links">
+      <li><a href="../">Home</a></li>
+      <li><a href="../demo/">Demo</a></li>
+      <li><a href="../viewer/">Inspect</a></li>
+      <li><a href="../docs/">Docs</a></li>
+      <li><a href="../research/">Research</a></li>
+      <li><a href="../blog/" class="active">Blog</a></li>
+      <li><a href="../about.html">About</a></li>
+    </ul>
+  </div>
+</nav>
+
+<main>
+
+  <div class="container">
+    <div class="blog-post-header">
+      <h1>Preparing for Post-Quantum: ML-KEM-768 and Hybrid Key Establishment</h1>
+      <div class="blog-post-meta">April 17, 2026 &middot; Zion Boggan &middot; ~6 min read</div>
+    </div>
+
+    <div class="blog-content">
+
+      <p>Most data provenance systems don't think about post-quantum cryptography, and for most of them, that's fine. If you're signing a software release or timestamping a commit, the signature only needs to be valid for a few years. By the time a cryptographically relevant quantum computer exists, you've long since moved to new keys and new signatures. But Oversight has a different threat model. A sealed document might contain a trade secret, a classified assessment, or a legal record that remains sensitive for decades. The encryption protecting that document needs to hold up not just today, but against an adversary who records the ciphertext now and decrypts it in fifteen years with hardware that doesn't exist yet.</p>
+
+      <p>This is the harvest-now-decrypt-later (HNDL) attack, and it is not theoretical. Intelligence agencies and well-resourced corporate adversaries routinely capture encrypted traffic for future decryption. If a sealed Oversight document is transmitted over a network that an adversary can observe, the ciphertext is capturable. If the key agreement is X25519 alone, and a sufficiently large quantum computer eventually breaks the elliptic curve discrete log problem, every sealed document encrypted with that key pair becomes readable retroactively. For a protocol that promises long-term confidentiality, this is an existential risk.</p>
+
+      <h2>NIST's Post-Quantum Standards</h2>
+
+      <p>NIST finalized its first set of post-quantum cryptographic standards in 2024. FIPS 203 specifies ML-KEM (Module Lattice Key Encapsulation Mechanism), a lattice-based KEM derived from the CRYSTALS-Kyber submission. FIPS 204 specifies ML-DSA (Module Lattice Digital Signature Algorithm), derived from CRYSTALS-Dilithium. These are not experimental algorithms; they survived years of public cryptanalysis during the NIST competition, and they are now federal standards with the same normative weight as AES or SHA-2.</p>
+
+      <p>Oversight uses ML-KEM-768 for key encapsulation and ML-DSA-65 for signatures. The 768 and 65 parameter sets represent the NIST Security Level 3, roughly equivalent to AES-192 in classical terms and targeted at 128-bit post-quantum security. I chose Level 3 rather than Level 5 because the performance and key size trade-offs at Level 5 are significant (ML-KEM-1024 public keys are 1,568 bytes vs. 1,184 for ML-KEM-768), and the security margin at Level 3 is already substantial. If Level 3 falls, the lattice problem itself is likely broken, and Level 5 won't save you.</p>
+
+      <h2>The Hybrid Approach</h2>
+
+      <p>Oversight does not use ML-KEM-768 alone. Instead, it defines a hybrid cipher suite called <code>OSGT-HYBRID-v1</code> that combines classical and post-quantum primitives at both the key agreement and signature layers. For key agreement, the sender performs both an X25519 key exchange and an ML-KEM-768 encapsulation against the recipient's public keys. The two resulting shared secrets are concatenated and fed into HKDF-SHA256 to derive the final symmetric key. For signatures, the sender produces both an Ed25519 signature and an ML-DSA-65 signature over the manifest, and both must verify for the seal to be accepted.</p>
+
+      <p>The KEM combiner is simple by design. The concatenated shared secrets (32 bytes from X25519 + 32 bytes from ML-KEM-768) are used as the input keying material (IKM) to HKDF-SHA256, with the string <code>"oversight-hybrid-v1"</code> as the salt and the recipient's public key fingerprint as the info parameter. This follows the general pattern recommended by the IETF's hybrid key exchange drafts: combine at the KDF layer, not at the KEM layer. The resulting 32-byte key is used with XChaCha20-Poly1305 exactly as in the classical-only suite.</p>
+
+      <p>Why hybrid instead of pure post-quantum? Two reasons. First, lattice-based cryptography is young relative to elliptic curve cryptography. The underlying mathematical problem (Module Learning With Errors) has been studied intensively for about fifteen years. ECC has been studied for forty. If a breakthrough weakness in lattice assumptions appears, the classical X25519 component provides a fallback. The hybrid scheme is at least as strong as the stronger of its two components; it degrades gracefully rather than catastrophically.</p>
+
+      <p>Second, hardware security modules and smart cards currently support only classical curves. YubiKeys, for example, support Ed25519 and X25519 but have no ML-KEM or ML-DSA support. Oversight recipients who store their private keys on hardware tokens can use the classical-only suite today and upgrade to hybrid when their hardware supports it. A pure post-quantum suite would lock out hardware-backed keys entirely, which is unacceptable for high-security deployments where key extraction from hardware is the primary threat.</p>
+
+      <h2>Implementation Details</h2>
+
+      <p>The Python implementation uses liboqs-python, the Python bindings for the Open Quantum Safe project's liboqs C library. liboqs provides ML-KEM and ML-DSA implementations that track the NIST final standards. The integration was relatively clean: <code>oqs.KeyEncapsulation("ML-KEM-768")</code> for the KEM and <code>oqs.Signature("ML-DSA-65")</code> for signatures. The hybrid key derivation is handled in <code>oversight/crypto/hybrid.py</code>, which calls both the classical (PyNaCl) and post-quantum (liboqs) primitives and combines the results through HKDF.</p>
+
+      <p>The Rust implementation uses the <code>ml-kem</code> crate for ML-KEM-768, which is a pure-Rust implementation of FIPS 203. For ML-DSA-65, I use the <code>ml-dsa</code> crate from the RustCrypto project. Both crates are pure Rust with no C dependencies, which simplifies the build and means the entire Rust implementation benefits from Rust's memory safety guarantees without any unsafe FFI boundaries. The trade-off is that neither crate has been independently audited yet. The RustCrypto project has a strong track record, but "strong track record" is not the same as "audited." This is documented in the threat model.</p>
+
+      <p>The test suite includes 7 post-quantum-specific tests. These cover ML-KEM-768 encapsulation round-trips, ML-DSA-65 sign/verify cycles, hybrid key derivation consistency between Python and Rust, and full seal/open cycles using the <code>OSGT-HYBRID-v1</code> suite. The conformance tests verify that a document sealed with hybrid mode in Python produces a container that the Rust implementation can open, and vice versa.</p>
+
+      <h2>The Version Mismatch Warning</h2>
+
+      <p>During integration testing, I encountered a compatibility issue between liboqs and its Python bindings. The system-installed liboqs was version 0.15.0, but liboqs-python was pinned to version 0.14.1. The two versions used slightly different internal parameter encodings for ML-KEM-768 key generation. Keys generated by liboqs 0.15.0 through the Python bindings built against 0.14.1 were valid ML-KEM keys, but the encapsulation sometimes produced different ciphertext than expected because the bindings were passing parameters through a compatibility shim that didn't account for a struct layout change.</p>
+
+      <p>This produced a confusing failure mode: Python-to-Python seal/open worked fine (both sides used the same shimmed path), but Python-to-Rust seal/open failed intermittently because the Rust side, using a spec-conformant pure-Rust implementation, couldn't decapsulate the KEM ciphertext produced by the mismatched Python stack. The fix was to pin both liboqs and liboqs-python to 0.15.0 and rebuild the bindings from source. I added a version check to <code>oversight/crypto/hybrid.py</code> that raises an explicit error if the liboqs shared library version doesn't match the bindings version. Silent version mismatches in cryptographic dependencies are exactly the kind of issue that causes real-world security failures.</p>
+
+      <h2>What's Deferred to v0.6</h2>
+
+      <p>Hardware-backed post-quantum keys are not supported in the current release. This is a deliberate deferral, not an oversight. No commercially available HSM or smart card supports ML-KEM or ML-DSA key storage as of early 2026. YubiKey's roadmap mentions post-quantum support but hasn't shipped it. Thales Luna HSMs support Dilithium in firmware but not through their PKCS#11 interface in a way that's usable for KEM operations.</p>
+
+      <p>When hardware support arrives, Oversight will need a key management layer that can negotiate between classical-only hardware keys and hybrid software keys on a per-recipient basis. The protocol already supports this through the cipher suite field in the manifest (recipients declare whether they accept <code>OSGT-CLASSIC-v1</code>, <code>OSGT-HYBRID-v1</code>, or both), but the key storage and selection logic hasn't been implemented yet. I've scoped this for v0.6, contingent on at least one hardware vendor shipping ML-KEM support in a generally available product.</p>
+
+      <p>The broader point is that post-quantum migration is a process, not a switch. Oversight's hybrid approach is designed to be transitional: it provides post-quantum protection today for users who need it, without breaking compatibility for users whose hardware and workflows aren't ready. As hardware catches up and the lattice-based standards accumulate more cryptanalytic confidence, a future version can offer a pure post-quantum suite as the default. Until then, hybrid is the responsible choice.</p>
+
+    </div>
+  </div>
+
+</main>
+
+<footer class="site-footer">
+  <div class="container">
+    <p>Oversight Protocol &copy; 2026 Zion Boggan. Apache 2.0 License.</p>
+    <p style="color:var(--text-muted);font-size:13px;">Co-authored with Claude Opus 4.6 and 4.7 (Anthropic).</p>
+    <p><a href="https://github.com/oversight-protocol/oversight">GitHub</a></p>
+  </div>
+</footer>
+
+<script src="../js/nav.js" defer></script>
+</body>
+</html>

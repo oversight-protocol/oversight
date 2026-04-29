@@ -1,0 +1,463 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>CLI Reference | Oversight Protocol</title>
+  <meta name="description" content="Command-line reference for the Oversight CLI: keygen, seal, open, inspect, and attribute subcommands with flags and example workflows.">
+  <meta name="author" content="Zion Boggan">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="../css/style.css">
+</head>
+<body>
+
+<nav class="site-nav">
+  <div class="nav-inner">
+    <a href="../" class="nav-brand"><span>Oversight</span> Protocol</a>
+    <ul class="nav-links">
+      <li><a href="../">Home</a></li>
+      <li><a href="../demo/">Demo</a></li>
+      <li><a href="../viewer/">Inspect</a></li>
+      <li><a href="../docs/" class="active">Docs</a></li>
+      <li><a href="../research/">Research</a></li>
+      <li><a href="../blog/">Blog</a></li>
+      <li><a href="../about.html">About</a></li>
+    </ul>
+  </div>
+</nav>
+
+<main>
+  <div class="container">
+    <div class="page-header">
+      <h1>CLI Reference</h1>
+      <p class="subtitle">Complete reference for the <code>oversight</code> command-line tool</p>
+    </div>
+
+    <p style="color:var(--text-muted);font-size:14px;">
+      Zion Boggan &middot; April 2026 &middot; Oversight Protocol v0.4.5
+    </p>
+
+    <p>
+      The <code>oversight</code> CLI provides six subcommands: <code>keygen</code> for
+      identity creation, <code>seal</code> for encrypting and watermarking documents,
+      <code>open</code> for decryption with policy enforcement, <code>inspect</code> for
+      manifest examination without decryption, <code>attribute</code> for forensic
+      watermark recovery from leaked text, and <code>gui</code> for the Tkinter desktop
+      starter app. The CLI is a thin wrapper around the <code>oversight_core</code>
+      Python library; all cryptographic and watermarking logic lives in the library layer.
+    </p>
+
+    <!-- ============ keygen ============ -->
+    <h2 id="keygen">keygen</h2>
+    <p>
+      Generate a new Oversight identity containing an X25519 keypair (encryption) and an
+      Ed25519 keypair (signing). The command writes two files: a private identity file and
+      a public-only sibling with the <code>.pub.json</code> suffix.
+    </p>
+
+    <h3>Flags</h3>
+    <table>
+      <thead><tr><th>Flag</th><th>Required</th><th>Description</th></tr></thead>
+      <tbody>
+        <tr><td><code>--out PATH</code></td><td>Yes</td><td>Output path for the private identity file (JSON). A public sibling is written alongside it.</td></tr>
+        <tr><td><code>--id NAME</code></td><td>No</td><td>Human-readable identifier stored in the identity file. Defaults to <code>"identity"</code>.</td></tr>
+      </tbody>
+    </table>
+
+    <h3>Output Files</h3>
+    <p>
+      The private identity file contains <code>x25519_priv</code>, <code>x25519_pub</code>,
+      <code>ed25519_priv</code>, and <code>ed25519_pub</code> as hex strings, plus the
+      <code>id</code> field. The public file (<code>.pub.json</code>) contains only
+      <code>id</code>, <code>x25519_pub</code>, and <code>ed25519_pub</code>. Distribute
+      the public file to issuers; keep the private file secure.
+    </p>
+
+    <h3>Example</h3>
+<pre><code>oversight keygen --out alice.json --id alice@example.com
+
+# Output:
+# [+] wrote private identity to alice.json
+# [+] wrote public  identity to alice.pub.json</code></pre>
+
+    <!-- ============ seal ============ -->
+    <h2 id="seal">seal</h2>
+    <p>
+      Produce a <code>.sealed</code> file for a specific recipient. The seal operation
+      optionally watermarks the plaintext (L1, L2, L3), computes a content fingerprint,
+      signs the manifest with the issuer's Ed25519 key, encrypts the content with
+      XChaCha20-Poly1305, and wraps the DEK to the recipient's X25519 public key.
+    </p>
+
+    <h3>Flags</h3>
+    <table>
+      <thead><tr><th>Flag</th><th>Required</th><th>Description</th></tr></thead>
+      <tbody>
+        <tr><td><code>INPUT</code></td><td>Yes</td><td>Positional argument: path to the plaintext file to seal.</td></tr>
+        <tr><td><code>--recipient-pub PATH</code></td><td>Yes</td><td>Path to the recipient's public identity file (<code>.pub.json</code>).</td></tr>
+        <tr><td><code>--issuer-id ID</code></td><td>Yes</td><td>Issuer identifier string stored in the manifest.</td></tr>
+        <tr><td><code>--issuer-key PATH</code></td><td>Yes</td><td>Path to the issuer's private identity file (JSON).</td></tr>
+        <tr><td><code>--registry-url URL</code></td><td>Yes</td><td>Registry URL stored in the manifest policy field.</td></tr>
+        <tr><td><code>--out PATH</code></td><td>Yes</td><td>Output path for the <code>.sealed</code> file.</td></tr>
+        <tr><td><code>--watermark</code></td><td>No</td><td>Enable text watermarking. Requires UTF-8 input. Applies L1 and L2 by default; L3 is governed by <code>--l3-mode</code> and defaults to safe behavior for wording-sensitive document classes.</td></tr>
+        <tr><td><code>--l3-mode MODE</code></td><td>No</td><td>One of <code>auto</code> (default), <code>off</code>, <code>full</code>, or <code>boilerplate</code>. <code>auto</code> picks the safest mode for the document class; <code>boilerplate</code> marks only header, footer, and cover-page regions; <code>full</code> marks body text.</td></tr>
+        <tr><td><code>--l3-ack</code></td><td>Conditional</td><td>Required when L3 would rewrite body text (<code>full</code> or <code>boilerplate</code> modes that hit body regions). Explicit acknowledgement that the recipient copy is textually non-identical to the canonical source. Recorded in the manifest under <code>l3_policy</code>.</td></tr>
+        <tr><td><code>--document-class CLASS</code></td><td>No</td><td>One of <code>prose</code>, <code>legal</code>, <code>regulatory</code>, <code>technical</code>, <code>source_code</code>, <code>sql</code>, <code>log</code>, or <code>structured</code>. Controls the <code>auto</code> L3 policy. If omitted, the class is inferred from content and file extension.</td></tr>
+        <tr><td><code>--registry-domain DOMAIN</code></td><td>No</td><td>Domain for DNS beacon generation. Defaults to <code>"oversight.example"</code>.</td></tr>
+        <tr><td><code>--content-type MIME</code></td><td>No</td><td>MIME type stored in the manifest. Defaults to <code>"application/octet-stream"</code>.</td></tr>
+        <tr><td><code>--register URL</code></td><td>No</td><td>If provided, POST the manifest, watermarks, beacons, and fingerprint to this registry URL after sealing.</td></tr>
+      </tbody>
+    </table>
+
+    <h3>Watermark Behavior</h3>
+    <p>
+      When <code>--watermark</code> is specified and the input is valid UTF-8, the CLI
+      generates a single 64-bit <code>mark_id</code>. L1 (zero-width Unicode) and L2
+      (trailing whitespace) are applied by default because they do not change visible bytes.
+      L3 (synonym rotation, punctuation, spelling, contractions, number formatting) is
+      governed by <code>--l3-mode</code>.
+    </p>
+    <p>
+      Under <code>--l3-mode auto</code> (the default), v0.4.5 picks the safest mode for the
+      document class: <code>full</code> for prose, <code>boilerplate</code> for legal and
+      regulatory, and <code>off</code> for technical specifications, source code, SQL, logs,
+      and structured data. <code>boilerplate</code> marks only header, footer, and cover-page
+      style regions. Whenever L3 would rewrite body text, <code>--l3-ack</code> is required
+      and the manifest records the acknowledgement, mode, and document class under
+      <code>l3_policy</code>. The manifest also records <code>canonical_content_hash</code>,
+      a SHA-256 of the pre-watermark source bytes, so disputes can verify the recipient copy
+      against the canonical source.
+    </p>
+    <p>
+      If the input is not valid UTF-8 (for example, binary files), watermarking is skipped
+      with a warning. The seal still proceeds without marks.
+    </p>
+
+    <h3>L3 Safety Examples</h3>
+<pre><code># Legal contract: L3 off, body text is byte-identical to canonical source
+oversight seal contract.txt --to alice --l3-mode off
+
+# Legal contract with boilerplate-only marks, ack required
+oversight seal contract.txt --to alice --l3-mode boilerplate --l3-ack --document-class legal
+
+# Ordinary prose: full L3 with explicit ack
+oversight seal memo.txt --to alice --l3-mode full --l3-ack --document-class prose</code></pre>
+
+    <h3>Fingerprint Output</h3>
+    <p>
+      For UTF-8 inputs, the CLI also computes a <code>ContentFingerprint</code> (winnowing +
+      sentence hashing) and writes it to <code>OUTPUT.fingerprint.json</code> alongside the
+      sealed file. This fingerprint is the server-side record used for attribution when all
+      embedded watermarks have been stripped (the VM-export attack defense). If
+      <code>--register</code> is specified, the fingerprint is included in the registration
+      payload.
+    </p>
+
+    <h3>Example</h3>
+<pre><code>oversight seal report.txt \
+  --recipient-pub alice.pub.json \
+  --issuer-id legal-dept \
+  --issuer-key issuer.json \
+  --registry-url https://reg.example.com \
+  --out report.sealed \
+  --watermark \
+  --register https://reg.example.com
+
+# Output:
+# [+] embedded L1 mark a1b2c3d4e5f60718
+# [+] embedded L2 mark a1b2c3d4e5f60718
+# [+] embedded L3 mark a1b2c3d4e5f60718 (semantic + punctuation)
+# [+] content fingerprint: 142 winnow hashes, 38 sentence hashes
+# [+] wrote report.sealed (14832 bytes)
+# [+] file_id=9f3a...
+# [+] recipient=alice@example.com
+# [+] beacons=4  watermarks=3
+# [+] wrote fingerprint to report.fingerprint.json
+# [+] registered with https://reg.example.com: {"status": "ok"}</code></pre>
+
+    <!-- ============ open ============ -->
+    <h2 id="open">open</h2>
+    <p>
+      Decrypt a <code>.sealed</code> file using the recipient's private identity. The open
+      operation verifies the manifest signature, enforces policy constraints (time windows,
+      jurisdiction, max_opens), unwraps the DEK, decrypts the content, and performs a
+      post-decrypt content hash check.
+    </p>
+
+    <h3>Flags</h3>
+    <table>
+      <thead><tr><th>Flag</th><th>Required</th><th>Description</th></tr></thead>
+      <tbody>
+        <tr><td><code>INPUT</code></td><td>Yes</td><td>Positional argument: path to the <code>.sealed</code> file.</td></tr>
+        <tr><td><code>--identity PATH</code></td><td>Yes</td><td>Path to the recipient's private identity file (JSON).</td></tr>
+        <tr><td><code>--out PATH</code></td><td>Yes</td><td>Output path for the decrypted plaintext.</td></tr>
+      </tbody>
+    </table>
+
+    <h3>Policy Enforcement</h3>
+    <p>
+      Before decryption proceeds, the client checks the manifest's policy fields against
+      the current environment. If <code>not_after</code> is set and the system clock
+      exceeds it, decryption is refused. If <code>max_opens</code> is set, an atomic
+      check-and-bump operation (advisory file lock + atomic rename to prevent TOCTOU races)
+      enforces the limit. If the open count exceeds the maximum, decryption does not proceed
+      and the violation is logged. Jurisdiction checks use IP geolocation when configured.
+    </p>
+
+    <h3>Example</h3>
+<pre><code>oversight open report.sealed \
+  --identity alice.json \
+  --out report_decrypted.txt
+
+# Output:
+# [+] decrypted to report_decrypted.txt
+# [+] file_id   = 9f3a...
+# [+] issuer    = legal-dept
+# [+] recipient = alice@example.com
+# [+] marks     = 3
+# [+] beacons   = 4</code></pre>
+
+    <!-- ============ inspect ============ -->
+    <h2 id="inspect">inspect</h2>
+    <p>
+      Dump the signed manifest from a <code>.sealed</code> file without decrypting
+      the content. Useful for auditing metadata (issuer, recipient, policy, watermark
+      references, beacons) without requiring the recipient's private key.
+    </p>
+
+    <h3>Flags</h3>
+    <table>
+      <thead><tr><th>Flag</th><th>Required</th><th>Description</th></tr></thead>
+      <tbody>
+        <tr><td><code>INPUT</code></td><td>Yes</td><td>Positional argument: path to the <code>.sealed</code> file.</td></tr>
+      </tbody>
+    </table>
+
+    <h3>Output</h3>
+    <p>
+      Prints the manifest as indented JSON to stdout, followed by a line indicating
+      whether the Ed25519 signature is valid. The manifest includes all fields: file_id,
+      issued_at, issuer_id, recipient binding, watermark references, beacon tokens, policy
+      constraints, and algorithm suite.
+    </p>
+
+    <h3>Example</h3>
+<pre><code>oversight inspect report.sealed
+
+# Output:
+# {
+#   "file_id": "9f3a...",
+#   "issued_at": 1745020800,
+#   "version": "OVERSIGHT-v1",
+#   "suite": "OSGT-CLASSIC-v1",
+#   "issuer_id": "legal-dept",
+#   "recipient": {
+#     "recipient_id": "alice@example.com",
+#     "x25519_pub": "a4b5..."
+#   },
+#   "watermarks": [
+#     {"layer": "L1_zero_width", "mark_id": "a1b2c3d4e5f60718"},
+#     {"layer": "L2_whitespace", "mark_id": "a1b2c3d4e5f60718"},
+#     {"layer": "L3_semantic",   "mark_id": "a1b2c3d4e5f60718"}
+#   ],
+#   ...
+# }
+#
+# [valid manifest signature] True</code></pre>
+
+    <!-- ============ attribute ============ -->
+    <h2 id="attribute">attribute</h2>
+    <p>
+      Forensic attribution pipeline for leaked text. Reads a suspected leak, attempts to
+      recover watermark marks across all three layers, queries the registry for recipient
+      identification, and optionally compares content fingerprints against stored copies.
+      The pipeline runs in five phases.
+    </p>
+
+    <h3>Flags</h3>
+    <table>
+      <thead><tr><th>Flag</th><th>Required</th><th>Description</th></tr></thead>
+      <tbody>
+        <tr><td><code>--leak PATH</code></td><td>Yes</td><td>Path to the leaked text file (read as UTF-8).</td></tr>
+        <tr><td><code>--registry URL</code></td><td>Yes</td><td>Registry server URL for mark_id lookups and candidate retrieval.</td></tr>
+        <tr><td><code>--fingerprints PATH</code></td><td>No</td><td>Path to a <code>.fingerprint.json</code> file or a directory containing multiple fingerprint files. Enables Phase 5 content fingerprint comparison for VM-strip-export detection.</td></tr>
+      </tbody>
+    </table>
+
+    <h3>Five-Phase Pipeline</h3>
+
+    <h4>Phase 1: Direct Extraction (L1 + L2)</h4>
+    <p>
+      Extracts zero-width Unicode frames (L1) and trailing whitespace marks (L2) directly
+      from the text. L1 reports the number of frames found and unique mark IDs. L2 uses
+      partial recovery (<code>extract_ws_partial</code>), reporting bits recovered, total
+      bits needed, and confidence percentage.
+    </p>
+
+    <h4>Phase 2: Registry Query</h4>
+    <p>
+      For each mark_id recovered in Phase 1, queries the registry's
+      <code>POST /attribute</code> endpoint to resolve the mark to a recipient and file.
+      Also fetches all known mark_ids from the registry's <code>GET /marks</code> endpoint
+      to build a candidate set for L3 verification in the next phase.
+    </p>
+
+    <h4>Phase 3: L3 Semantic Verification</h4>
+    <p>
+      Tests all candidate mark_ids (from L1/L2 extraction plus registry candidates) against
+      the semantic marks in the text. For each candidate, <code>verify_semantic()</code>
+      checks synonym choices, punctuation style, spelling variants, and contractions.
+      Candidates scoring above the 0.65 weighted threshold are reported with per-sublayer
+      detail.
+    </p>
+
+    <h4>Phase 4: Multi-Layer Fusion</h4>
+    <p>
+      Combines evidence from all layers using <code>recover_marks_v2()</code>. Bayesian
+      fusion scores each candidate using independence-assumption combination:
+      L1 exact match scores 0.95, L2 exact match scores 0.90 (scaled by confidence for
+      partial recovery), L3 match scores the semantic score times 0.85. When multiple
+      layers agree on the same mark_id, the combined score is computed as
+      <code>1 - (1 - s1)(1 - s2)...(1 - sN)</code>. The best candidate is reported
+      with confidence percentage and evidence breakdown.
+    </p>
+
+    <h4>Phase 5: Content Fingerprint Comparison (Optional)</h4>
+    <p>
+      If <code>--fingerprints</code> is provided, computes a <code>ContentFingerprint</code>
+      of the leaked text and compares it against each stored fingerprint file. Reports
+      winnowing similarity (Jaccard), sentence similarity (set overlap), combined score
+      (0.4 * winnowing + 0.6 * sentence), and a verdict (MATCH, LIKELY, UNLIKELY, NO_MATCH).
+      Threshold for positive attribution is combined score &ge; 0.3.
+    </p>
+    <p>
+      Phase 5 is the fallback for the VM-strip-export attack, where the adversary opens
+      the document in an airgapped VM, strips all invisible characters and whitespace
+      artifacts, and exports a clean file. The content fingerprint identifies which
+      recipient's copy was the source by comparing the text structure (not the watermarks)
+      against stored records.
+    </p>
+
+    <h3>Example: Full Attribution</h3>
+<pre><code>oversight attribute \
+  --leak leaked_report.txt \
+  --registry https://reg.example.com \
+  --fingerprints ./sealed_copies/
+
+# Output:
+# [*] Phase 1: Direct extraction (L1 + L2)
+#     L1: 24 frames, 1 unique mark(s)
+#         a1b2c3d4e5f60718
+#     L2: 64/64 bits recovered (100%): a1b2c3d4e5f60718
+#
+# [*] Phase 2: Registry query (https://reg.example.com)
+#     MATCH: a1b2c3d4e5f60718 -> recipient=alice, file=9f3a...
+#     fetched 3 candidate mark_id(s) from registry
+#
+# [*] Phase 3: L3 semantic verification (3 candidate(s))
+#     L3 MATCH: a1b2c3d4e5f60718 score=0.87 (synonyms=0.87, punct=2/3, dict=v2)
+#
+# [*] Phase 4: Multi-layer fusion
+#     a1b2c3d4e5f60718  score=0.999  layers=L1+L2+L3
+#
+# [!!] BEST ATTRIBUTION: a1b2c3d4e5f60718
+#      confidence = 99.9%
+#      evidence   = L1+L2+L3
+#      file_id    = 9f3a...
+#      recipient  = alice
+#      issuer     = legal-dept
+#
+# [*] Phase 5: Content fingerprint comparison
+#     Leak fingerprint: 138 winnow hashes, 36 sentence hashes
+#     report.fingerprint.json: recipient=alice winnow=0.91 sentence=0.94 combined=0.93 [MATCH]
+#
+# [!!] FINGERPRINT ATTRIBUTION [MATCH]:
+#      recipient  = alice
+#      mark_id    = a1b2c3d4e5f60718
+#      confidence = 92.8%</code></pre>
+
+    <h3>Example: Attribution After Watermark Stripping</h3>
+<pre><code>oversight attribute \
+  --leak stripped_report.txt \
+  --registry https://reg.example.com \
+  --fingerprints ./sealed_copies/
+
+# Output:
+# [*] Phase 1: Direct extraction (L1 + L2)
+#     L1: no zero-width frames found (stripped?)
+#     L2: no trailing whitespace marks found (stripped?)
+#
+# [*] Phase 2: Registry query (https://reg.example.com)
+#     fetched 3 candidate mark_id(s) from registry
+#
+# [*] Phase 3: L3 semantic verification (3 candidate(s))
+#     L3 MATCH: a1b2c3d4e5f60718 score=0.82 (synonyms=0.82, punct=3/3, dict=v2)
+#
+# [*] Phase 4: Multi-layer fusion
+#     a1b2c3d4e5f60718  score=0.697  layers=L3
+#
+# [!!] BEST ATTRIBUTION: a1b2c3d4e5f60718
+#      confidence = 69.7%
+#      evidence   = L3
+#
+# [*] Phase 5: Content fingerprint comparison
+#     report.fingerprint.json: recipient=alice winnow=0.88 sentence=0.91 combined=0.90 [MATCH]
+#
+# [!!] FINGERPRINT ATTRIBUTION [MATCH]:
+#      recipient  = alice
+#      confidence = 89.8%</code></pre>
+
+    <!-- ============ gui ============ -->
+    <h2 id="gui">gui</h2>
+    <p>
+      Launch the Tkinter desktop starter app added in v0.4.5. The GUI exposes the three
+      first-contact workflows a recipient or issuer typically needs: generate an identity,
+      seal a file to a recipient, and open a sealed file. It is built on the standard library
+      <code>tkinter</code> toolkit, so no additional GUI dependencies are installed alongside
+      the existing wheel.
+    </p>
+
+    <h3>Scope</h3>
+    <p>
+      The GUI starter is a stepping stone, not the public launch surface. The broader launch
+      sequence (web viewer, drag-drop share workflow, Outlook add-in, design-partner
+      deployment, SOC 2 Type 1 scoping) still gates a broad public launch. For production
+      batch workflows, prefer the CLI.
+    </p>
+
+    <h3>Example</h3>
+<pre><code>oversight gui
+
+# Opens a Tkinter window with three panes:
+#   - Generate identity: writes a new .json / .pub.json pair.
+#   - Seal: pick input file, recipient .pub.json, issuer identity, output path.
+#   - Open: pick a .sealed file and a recipient identity; writes decrypted output.</code></pre>
+
+    <hr>
+    <p style="color:var(--text-muted);font-size:14px;">
+      This reference documents the Python CLI as of v0.4.5, including the L3 safety flags
+      (<code>--l3-mode</code>, <code>--l3-ack</code>, <code>--document-class</code>) and the
+      <code>oversight gui</code> subcommand. The Rust CLI (<code>oversight-cli</code> crate)
+      supports <code>keygen</code>, <code>seal</code>, <code>open</code>, and
+      <code>inspect</code> but does not yet embed L3 watermarks or compute content
+      fingerprints. Consult the
+      <a href="https://github.com/oversight-protocol/oversight">repository</a> for the
+      latest CLI capabilities.
+    </p>
+
+  </div>
+</main>
+
+<footer class="site-footer">
+  <div class="container">
+    <p>Oversight Protocol &copy; 2026 Zion Boggan. Apache 2.0 License.</p>
+    <p style="color:var(--text-muted);font-size:13px;">Co-authored with Claude Opus 4.6 and 4.7 (Anthropic).</p>
+    <p><a href="https://github.com/oversight-protocol/oversight">GitHub</a></p>
+  </div>
+</footer>
+
+<script src="../js/nav.js" defer></script>
+</body>
+</html>

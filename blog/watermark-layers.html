@@ -1,0 +1,108 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Three Layers of Invisible Watermarking: Surviving Copy-Paste, Reformatting, and the Airgap</title>
+  <meta name="description" content="A deep technical walkthrough of Oversight's three watermark layers: zero-width Unicode, trailing whitespace, and semantic synonym rotation.">
+  <meta name="author" content="Zion Boggan">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="../css/style.css">
+</head>
+<body>
+
+<nav class="site-nav">
+  <div class="nav-inner">
+    <a href="../" class="nav-brand"><span>Oversight</span> Protocol</a>
+    <ul class="nav-links">
+      <li><a href="../">Home</a></li>
+      <li><a href="../demo/">Demo</a></li>
+      <li><a href="../viewer/">Inspect</a></li>
+      <li><a href="../docs/">Docs</a></li>
+      <li><a href="../research/">Research</a></li>
+      <li><a href="../blog/" class="active">Blog</a></li>
+      <li><a href="../about.html">About</a></li>
+    </ul>
+  </div>
+</nav>
+
+<main>
+
+  <div class="container">
+    <div class="blog-post-header">
+      <h1>Three Layers of Invisible Watermarking: Surviving Copy-Paste, Reformatting, and the Airgap</h1>
+      <div class="blog-post-meta">March 28, 2026 &middot; Zion Boggan &middot; ~8 min read</div>
+    </div>
+
+    <div class="blog-content">
+
+      <p>The central claim of Oversight's watermarking system is that no single removal technique can strip all three layers simultaneously. Each layer targets a different signal channel, survives a different class of attack, and fails to a different class of adversary. The design is deliberately redundant. If you want to remove all attribution from a watermarked document, you need to strip invisible Unicode characters, trim trailing whitespace from every line, and paraphrase every sentence. That's a high bar, and it's the bar I wanted to set.</p>
+
+      <h2>Layer 1: Zero-Width Unicode Characters</h2>
+
+      <p>The first watermark layer encodes a 128-bit <code>mark_id</code> into the document text using three zero-width Unicode code points: U+200B (zero-width space, ZWSP), U+200C (zero-width non-joiner, ZWNJ), and U+200D (zero-width joiner, ZWJ). The encoding works by treating ZWSP and ZWNJ as binary 0 and 1 respectively, with ZWJ serving as a framing delimiter between encoded groups.</p>
+
+      <p>The 128-bit mark_id is split into 16-byte segments, each encoded as a sequence of ZWSP/ZWNJ characters and terminated by a ZWJ frame marker. These sequences are inserted at deterministic positions in the text, calculated from the SHA-256 hash of the recipient's public key fingerprint. The positions are chosen to fall between word boundaries, so the visible text remains identical. A document watermarked with Layer 1 looks exactly the same as the original in any text renderer; the marks are invisible to the reader.</p>
+
+      <p>Layer 1 survives copy-paste in nearly all modern applications. Most text editors, word processors, and email clients preserve zero-width characters during clipboard operations because they serve legitimate typographic functions in Arabic, Indic, and CJK scripts. The signal persists through format conversions (plain text to HTML, HTML to DOCX) and through most PDF text extraction pipelines.</p>
+
+      <p>The weakness is obvious: a Unicode-aware adversary can strip all zero-width characters with a single regular expression. Tools like <code>sed 's/[\u200B\u200C\u200D]//g'</code> or Python's <code>re.sub(r'[\u200b-\u200d]', '', text)</code> will eliminate Layer 1 entirely. This is expected and acceptable. Layer 1 catches unsophisticated leakers, people who copy-paste a document without thinking about invisible characters. It is the tripwire, not the trap.</p>
+
+      <h2>Layer 2: Trailing Whitespace Patterns</h2>
+
+      <p>The second layer encodes bits of the mark_id into the trailing whitespace at the end of each line. For each line in the document, the watermarking engine appends a specific number of space characters (between 0 and 7) to encode 3 bits of the mark_id. The pattern of trailing spaces across multiple lines reconstructs the full 128-bit identifier.</p>
+
+      <p>This layer occupies a different signal channel than Layer 1. While Layer 1 hides data within the visible text stream, Layer 2 hides data in the whitespace that follows each line. The two layers are orthogonal: stripping zero-width characters does not affect trailing whitespace, and trimming trailing whitespace does not affect zero-width characters.</p>
+
+      <p>Layer 2 survives most text processing pipelines that preserve line structure. Email forwarding, text file copying, and many document conversions retain trailing whitespace because they have no reason to remove it. The signal is particularly robust in plain text and Markdown workflows where line endings are semantically meaningful.</p>
+
+      <p>The kill shot for Layer 2 is <code>trim_end()</code> or its equivalent in any language. Any tool that strips trailing whitespace from lines will destroy this layer completely. Many code editors do this automatically on save (VS Code's <code>files.trimTrailingWhitespace</code> setting, for example). This makes Layer 2 fragile in developer-oriented workflows, but robust in business document workflows where trailing whitespace is rarely modified. Like Layer 1, this is a deliberate trade-off: Layer 2 catches a different population of leakers than Layer 1, and both together catch more than either alone.</p>
+
+      <h2>Layer 3: Semantic Synonym Rotation</h2>
+
+      <p>The third layer is the one I'm most interested in from a research perspective, because it operates on a fundamentally different signal channel. Layers 1 and 2 encode data in invisible or non-semantic characters. Layer 3 encodes data in the choice of visible, meaningful words. The signal is in the prose itself.</p>
+
+      <p>The engine maintains a synonym dictionary organized into 151 word classes. Each class contains between 2 and 8 semantically equivalent variants. For example, one class might contain {"quickly", "rapidly", "swiftly", "fast"}, another might contain {"important", "significant", "critical", "vital"}, and another might contain {"begin", "start", "commence", "initiate"}. When watermarking a document, the engine scans for words that belong to any of these 151 classes. For each match, it selects a specific variant determined by the mark_id and the word's position in the document. The selection is deterministic: given the same mark_id and position, the same variant is always chosen.</p>
+
+      <p>This dictionary covers roughly 20% of English prose, meaning that in a typical 1,000-word document, approximately 200 words are candidates for substitution. Not all of them will be substituted (the engine avoids replacing words where the synonym would be contextually awkward), but enough are modified to encode a recoverable signal. The mark_id is spread across dozens of word choices, providing redundancy against partial document recovery.</p>
+
+      <p>The critical property of Layer 3 is that it survives the airgap. If someone photographs a sealed document with a phone camera, OCRs the image, and retypes the text into a new file, Layers 1 and 2 are gone. The zero-width characters don't survive OCR. The trailing whitespace doesn't survive retyping. But the word choices persist, because the leaker is retyping the words they see, and the words they see have already been selected by the watermark engine. The signal is carried by the semantics of the document, not by its encoding.</p>
+
+      <h2>The 151-Class Dictionary</h2>
+
+      <p>The synonym dictionary went through significant expansion during development. The initial v0.1 implementation used only 40 word classes, which covered approximately 8% of typical prose. This was enough for proof-of-concept testing but provided insufficient redundancy for reliable extraction. A single missing word (due to partial quoting or truncation) could lose a significant fraction of the embedded signal.</p>
+
+      <p>I expanded the dictionary to 151 classes in v0.3, drawing from WordNet synsets filtered for genuine semantic equivalence. The filtering was manual and conservative. Many WordNet synsets contain words that are technically synonymous but contextually distinct ("die" and "decease" are synset neighbors, but no one writes "decease" in a business memo). Each class was reviewed to ensure that any variant could replace any other without changing the meaning or register of a sentence. The dictionary lives in <code>oversight/watermark/synonyms.py</code> and its Rust mirror in <code>oversight-semantic/src/dict.rs</code>.</p>
+
+      <h2>The Hyphenation Bug</h2>
+
+      <p>In v0.4 I fixed a round-trip verification bug that had been silently degrading Layer 3 accuracy since the dictionary expansion. Several word classes included hyphenated variants (e.g., "well-known" alongside "famous" and "renowned"). The problem was that the watermark embedding engine treated "well-known" as a single token, but the extraction engine, running on text that had been through a PDF round-trip, sometimes received it as two tokens: "well" and "known". This caused the extractor to miss the substitution and lose those bits of the mark_id.</p>
+
+      <p>The fix was straightforward: hyphenated variants in the dictionary are now normalized to their non-hyphenated form during extraction, and the embedding engine records whether hyphenation was present in the original. The before-and-after test in <code>tests/test_watermark_roundtrip.py</code> confirms that all 151 classes now survive a full seal-open-extract cycle, including classes with hyphenated variants. This is the kind of bug that only surfaces when you test against real-world document formats rather than clean synthetic inputs.</p>
+
+      <h2>The Fundamental Limitation</h2>
+
+      <p>I want to be direct about what Layer 3 cannot do: it does not survive deliberate human paraphrasing. If a leaker reads the document, understands its content, and rewrites it in their own words, all three watermark layers are destroyed. The zero-width characters are gone because the text is new. The trailing whitespace is gone because the line structure is new. The synonym selections are gone because the leaker chose their own words.</p>
+
+      <p>This is not a bug; it is a fundamental limit of any text watermarking scheme. You cannot attribute a paraphrase to a specific recipient without solving the open problem of authorship attribution, which is a much harder problem with much weaker guarantees. Some commercial vendors imply that their watermarking survives paraphrasing. I have not seen convincing evidence of this, and I am skeptical of any claim that doesn't come with a peer-reviewed evaluation methodology.</p>
+
+      <p>What Oversight does guarantee is that removing all attribution requires active effort. The leaker cannot simply copy-paste, screenshot, or reformat. They must paraphrase, which takes time, introduces errors, and produces a derivative work that may be identifiable through other forensic means. Raising the cost of anonymous leaking is the realistic goal. Eliminating it entirely is not achievable with current techniques, and I prefer to say so plainly rather than overclaim.</p>
+
+    </div>
+  </div>
+
+</main>
+
+<footer class="site-footer">
+  <div class="container">
+    <p>Oversight Protocol &copy; 2026 Zion Boggan. Apache 2.0 License.</p>
+    <p style="color:var(--text-muted);font-size:13px;">Co-authored with Claude Opus 4.6 and 4.7 (Anthropic).</p>
+    <p><a href="https://github.com/oversight-protocol/oversight">GitHub</a></p>
+  </div>
+</footer>
+
+<script src="../js/nav.js" defer></script>
+</body>
+</html>

@@ -1,0 +1,110 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Porting Oversight to Rust: Cross-Language Cryptographic Conformance</title>
+  <meta name="description" content="How I ported Oversight from Python to Rust, achieving bit-identical cryptographic output across both implementations.">
+  <meta name="author" content="Zion Boggan">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="../css/style.css">
+</head>
+<body>
+
+<nav class="site-nav">
+  <div class="nav-inner">
+    <a href="../" class="nav-brand"><span>Oversight</span> Protocol</a>
+    <ul class="nav-links">
+      <li><a href="../">Home</a></li>
+      <li><a href="../demo/">Demo</a></li>
+      <li><a href="../viewer/">Inspect</a></li>
+      <li><a href="../docs/">Docs</a></li>
+      <li><a href="../research/">Research</a></li>
+      <li><a href="../blog/" class="active">Blog</a></li>
+      <li><a href="../about.html">About</a></li>
+    </ul>
+  </div>
+</nav>
+
+<main>
+
+  <div class="container">
+    <div class="blog-post-header">
+      <h1>Porting Oversight to Rust: Cross-Language Cryptographic Conformance</h1>
+      <div class="blog-post-meta">April 10, 2026 &middot; Zion Boggan &middot; ~7 min read</div>
+    </div>
+
+    <div class="blog-content">
+
+      <p>When I started Oversight as a Python project, I knew a Rust port was inevitable. The question was when, not whether. Python is excellent for prototyping a cryptographic protocol because the code reads almost like pseudocode, and libraries like PyNaCl and liboqs-python provide clean bindings to well-audited C implementations. But Python has a fundamental problem for security-critical software: it cannot make memory safety guarantees. Buffer overflows, use-after-free, and type confusion are not common in pure Python, but the moment you touch C extensions (which PyNaCl does), you inherit the entire class of memory safety vulnerabilities that C carries.</p>
+
+      <p>The numbers back this up. Blessing et al. surveyed CVEs in cryptographic libraries and found that 37% of reported vulnerabilities were memory safety issues: buffer overflows, out-of-bounds reads, heap corruption. These are not logic bugs in the cryptographic algorithms themselves; they are implementation bugs in the languages used to implement them. Rust eliminates this entire class. Its ownership model, borrow checker, and lack of null pointers make it structurally impossible to write the kinds of code that produce these CVEs. For a protocol whose security claims depend on the correctness of its cryptographic implementation, that matters.</p>
+
+      <h2>The Crate Architecture</h2>
+
+      <p>The Rust implementation is split into seven crates, each mirroring a module in the Python codebase. This was a deliberate architectural choice: I wanted each crate to have a single, well-defined responsibility and a minimal public API surface.</p>
+
+      <p><code>oversight-crypto</code> handles all cryptographic primitives. X25519 key agreement via the x25519-dalek crate, XChaCha20-Poly1305 via chacha20poly1305, Ed25519 signatures via ed25519-dalek, and HKDF-SHA256 via hkdf and sha2. This crate exports key types, encryption/decryption functions, and signature operations. It does not know about documents, watermarks, or containers.</p>
+
+      <p><code>oversight-manifest</code> defines the canonical JSON manifest structure: sender and recipient key fingerprints, content hashes, timestamps, policy constraints, and inclusion proofs. Serialization uses serde_json with keys sorted alphabetically to ensure canonical output. This is critical for signature verification; the same manifest must serialize to the same bytes in both Python and Rust.</p>
+
+      <p><code>oversight-container</code> implements the <code>.sealed</code> file format. It reads and writes the container structure, validates the manifest signature, and coordinates the seal/open pipeline. This crate depends on oversight-crypto and oversight-manifest.</p>
+
+      <p><code>oversight-watermark</code> implements Layers 1 and 2 of the watermarking system. Layer 1 (zero-width Unicode insertion) required careful attention to Rust's string handling, since Rust strings are UTF-8 and inserting zero-width characters at arbitrary byte offsets can produce invalid UTF-8 if you're not careful. Layer 2 (trailing whitespace) was straightforward.</p>
+
+      <p><code>oversight-semantic</code> implements Layer 3, the synonym rotation engine. The 151-class dictionary is embedded as a compile-time constant using <code>include_str!</code> on a shared JSON dictionary file. The word matching and substitution logic was the most tedious part of the port because Python's <code>re</code> module and Rust's <code>regex</code> crate handle Unicode word boundaries differently. I ended up writing explicit boundary detection rather than relying on <code>\b</code> assertions.</p>
+
+      <p><code>oversight-tlog</code> implements the RFC 6962 Merkle tree, inclusion proofs, and consistency proofs. This was where the most painful conformance bug lived, which I'll cover below.</p>
+
+      <p><code>oversight-policy</code> handles policy evaluation: time-window checks, open-count enforcement, and jurisdiction validation via IP geolocation lookup.</p>
+
+      <p>The total Rust codebase is 2,934 lines of code across these seven crates, with 42 tests. Combined with the 34 Python tests, the project has 76 tests covering both implementations.</p>
+
+      <h2>The Conformance Requirement</h2>
+
+      <p>The hardest part of the port was not translating the algorithms from Python to Rust. That was mechanical. The hard part was achieving bit-identical output between the two implementations. When I say "bit-identical," I mean it literally: a document sealed by the Python SDK must produce exactly the same ciphertext, manifest, signature, and container bytes as the same document sealed by the Rust SDK with the same keys and the same nonce. And a file sealed by either implementation must be openable by the other with identical results.</p>
+
+      <p>This matters because Oversight is a protocol, not just a tool. If two implementations produce different output for the same input, then either the protocol is underspecified or one of the implementations is wrong. Both are unacceptable. The conformance test suite generates a set of test vectors (key pairs, plaintexts, nonces, expected outputs) and runs them through both implementations, asserting byte equality at every stage.</p>
+
+      <p>Most of the conformance work was boring in the best way: getting JSON key ordering right, matching HKDF salt formats, ensuring that nonce encoding is consistent (24 bytes, little-endian, zero-padded). But two issues were genuinely difficult, and both taught me something.</p>
+
+      <h2>The RFC 6962 Merkle Tree Bug</h2>
+
+      <p>The Python v0.2 implementation of the Merkle tree had a subtle spec deviation that didn't surface until I tried to verify Python-generated proofs in Rust. RFC 6962 specifies that the Merkle tree must use a "largest power of 2 less than n" split to divide the leaf set into left and right subtrees. This produces a left-heavy tree where the left subtree is always a complete binary tree. My original Python implementation used a different strategy: it paired leaves sequentially and promoted the odd trailing leaf to the next level without hashing. This "promote-odd-trailing" approach produces valid Merkle roots, but the inclusion proof paths are different from what RFC 6962 specifies.</p>
+
+      <p>The Python tests all passed because they verified proofs against roots generated by the same (non-conformant) algorithm. The Rust implementation, written against the RFC spec, generated different proof paths for the same leaf set. The roots matched only for trees whose size was a power of 2 (where the two algorithms are equivalent). For any other tree size, the proof paths diverged.</p>
+
+      <p>I fixed this in v0.4 by rewriting the Python Merkle tree to use the canonical RFC 6962 algorithm. The core functions are <code>_rfc6962_mth()</code> (Merkle Tree Hash) and <code>_rfc6962_path()</code> (inclusion proof generation), both in <code>oversight/tlog/merkle.py</code>. The fix was straightforward once I understood the spec correctly, but it required regenerating all existing test vectors and any transparency log entries created by v0.2 or v0.3. This is why I'm glad Oversight is still pre-1.0: breaking changes to internal data structures are acceptable now, and they won't be later.</p>
+
+      <h2>The Mutex Deadlock</h2>
+
+      <p>The second conformance issue was a concurrency bug in <code>oversight-tlog</code> that only manifested under the Rust test harness. The transparency log maintains an in-memory tree that gets appended to on every seal operation. In the Rust implementation, this tree is protected by a <code>Mutex</code> because multiple seal operations can run concurrently. The bug was a classic lock-ordering violation: the <code>append()</code> method acquired the tree lock, then called <code>sign_tree_head()</code>, which internally called back into the tree to read the current root, which tried to acquire the same lock. Deadlock.</p>
+
+      <p>This never happened in Python because Python's GIL serializes all access to shared state, making the lock-ordering issue invisible. In Rust, with actual concurrent execution, the deadlock was immediate and deterministic. The fix was to restructure the code so that <code>append()</code> computes the new root, releases the tree lock, then signs the root in a separate step. The signed tree head is attached to the log entry after the fact rather than during the append. This added three lines of code and eliminated the deadlock.</p>
+
+      <p>I mention this because it illustrates why a Rust port is more than just a performance exercise. The Rust compiler did not catch this deadlock (Rust's type system prevents data races, not deadlocks), but the Rust runtime exposed it immediately because actual parallelism exists. Python's threading model hid the bug behind the GIL. Running the same logical code in both languages, with different concurrency models, is a powerful form of differential testing. The Rust port found a real bug in the protocol's concurrency assumptions, not just a translation error.</p>
+
+      <h2>Current State</h2>
+
+      <p>Both implementations are now conformant against the shared test vector suite. The Rust crates are published to a private registry (they'll move to crates.io after the audit) and are usable as a library dependency. The Rust CLI (<code>oversight-cli</code>) supports the same <code>seal</code> and <code>open</code> commands as the Python CLI, and sealed files produced by either tool are interchangeable.</p>
+
+      <p>Performance is better in Rust, as expected, but the magnitude surprised me. Sealing a 100-page document takes 340ms in Python and 12ms in Rust. Most of that difference is in the watermarking engine (Python's regex-based synonym matching is slow on large texts) rather than the cryptographic operations (which are C-backed in both implementations). For batch sealing (sending a confidential document to 500 recipients), the Rust implementation is the practical choice. For interactive use, both are fast enough.</p>
+
+    </div>
+  </div>
+
+</main>
+
+<footer class="site-footer">
+  <div class="container">
+    <p>Oversight Protocol &copy; 2026 Zion Boggan. Apache 2.0 License.</p>
+    <p style="color:var(--text-muted);font-size:13px;">Co-authored with Claude Opus 4.6 and 4.7 (Anthropic).</p>
+    <p><a href="https://github.com/oversight-protocol/oversight">GitHub</a></p>
+  </div>
+</footer>
+
+<script src="../js/nav.js" defer></script>
+</body>
+</html>

@@ -1,0 +1,607 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Performance Evaluation: Measured Throughput, Overhead, and Scaling | Oversight Protocol</title>
+  <meta name="description" content="Research-grade performance evaluation of the Oversight protocol: seal/open throughput, watermark embedding overhead, extraction performance, content fingerprint cost, file size impact, ECC timing, and comparison with related systems.">
+  <meta name="author" content="Zion Boggan">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="../css/style.css">
+</head>
+<body>
+
+<nav class="site-nav">
+  <div class="nav-inner">
+    <a href="../" class="nav-brand"><span>Oversight</span> Protocol</a>
+    <ul class="nav-links">
+      <li><a href="../">Home</a></li>
+      <li><a href="../demo/">Demo</a></li>
+      <li><a href="../viewer/">Inspect</a></li>
+      <li><a href="../docs/">Docs</a></li>
+      <li><a href="../research/" class="active">Research</a></li>
+      <li><a href="../blog/">Blog</a></li>
+      <li><a href="../about.html">About</a></li>
+    </ul>
+  </div>
+</nav>
+
+<main>
+  <div class="container">
+    <div class="page-header">
+      <h1>Performance Evaluation: Measured Throughput, Overhead, and Scaling</h1>
+      <p class="subtitle">Systematic benchmarking of the Oversight seal/open pipeline, watermark embedding, extraction, fingerprinting, and ECC operations</p>
+    </div>
+
+    <p style="color:var(--text-muted);font-size:14px;">
+      Zion Boggan &middot; April 2026 &middot; Oversight Protocol v0.4.4
+    </p>
+
+    <!-- ============ 1. Abstract ============ -->
+    <h2 id="abstract">Abstract</h2>
+    <p>
+      This paper presents a systematic performance evaluation of the Oversight protocol v0.4.4, covering the complete seal/open pipeline, per-layer watermark embedding, watermark extraction, content fingerprint computation, file size overhead, and error-correcting code operations. All measurements were obtained on an Intel Core i7 (Family 6 Model 158) running Windows 10 under CPython 3.14.2, with each benchmark executed 10 times and reported as mean with standard deviation. Peak seal throughput reaches 253 MB/s at the 1 MB document level, dominated by XChaCha20-Poly1305 AEAD encryption. Watermark embedding adds 484% overhead at 1 MB, with L3 semantic processing (regex-based synonym matching across 151 classes) accounting for 85% of that cost. Content fingerprinting via winnowing operates at 3.35 seconds per megabyte. ECC encode and decode complete in sub-100-microsecond time. The evaluation identifies L3 regex replacement, L1 zero-width density, and winnowing k-gram computation as the three primary optimization targets.
+    </p>
+
+    <!-- ============ 2. Methodology ============ -->
+    <h2 id="methodology">1. Methodology</h2>
+    <p>
+      All benchmarks were executed on the following hardware and software configuration: Intel64 Family 6 Model 158 Stepping 9 (Intel Core i7), Windows 10 (AMD64), CPython 3.14.2. The benchmark script (<code>bench_usenix.py</code>) generates synthetic plaintext documents at four sizes (1 KB, 10 KB, 100 KB, and 1 MB) and executes each operation N=10 times, recording wall-clock time via <code>time.perf_counter()</code>. Results are reported as arithmetic mean and sample standard deviation. Minimum and maximum values are recorded for outlier identification. The benchmark script and raw output are available in the repository under <code>PERFORMANCE_BENCHMARKS.md</code>.
+    </p>
+    <p>
+      Two classes of measurement are reported. "Pipeline measurements" time the complete seal or open operation as experienced by a caller invoking the top-level API. "Component measurements" isolate individual stages (L1 embedding, L2 embedding, L3 embedding, content fingerprinting, ECC encode/decode, L3 verification) by timing their entry and exit points independently. Component measurements exclude Python import overhead and fixture setup.
+    </p>
+    <p>
+      The cryptographic backend is the <code>cryptography</code> library (wrapping OpenSSL) for X25519, Ed25519, HKDF-SHA256, and SHA-256, and <code>PyNaCl</code> (wrapping libsodium) for XChaCha20-Poly1305 AEAD. The watermarking, fingerprinting, and ECC modules are pure Python. The Rust port was not benchmarked for this evaluation; cross-language performance comparison is planned for a subsequent report.
+    </p>
+
+    <!-- ============ 3. Seal/Open Throughput ============ -->
+    <h2 id="throughput">2. Seal and Open Throughput</h2>
+    <p>
+      The seal operation constructs the manifest, performs X25519 key agreement, derives the DEK via HKDF-SHA256, encrypts the (watermarked) plaintext with XChaCha20-Poly1305, computes the SHA-256 content hash, signs the manifest with Ed25519, and serializes the binary container. The open operation parses the container, verifies the Ed25519 signature, performs X25519 key agreement, unwraps the DEK, decrypts the ciphertext, and verifies the SHA-256 content hash.
+    </p>
+
+    <table>
+      <thead>
+        <tr>
+          <th>Size</th>
+          <th>Seal Mean</th>
+          <th>Seal Stddev</th>
+          <th>Seal Throughput</th>
+          <th>Open Mean</th>
+          <th>Open Stddev</th>
+          <th>Open Throughput</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>1 KB</td>
+          <td>341 us</td>
+          <td>136 us</td>
+          <td>2.9 MB/s</td>
+          <td>1.16 ms</td>
+          <td>2.79 ms</td>
+          <td>0.8 MB/s</td>
+        </tr>
+        <tr>
+          <td>10 KB</td>
+          <td>323 us</td>
+          <td>9.7 us</td>
+          <td>30.2 MB/s</td>
+          <td>301 us</td>
+          <td>4.6 us</td>
+          <td>32.4 MB/s</td>
+        </tr>
+        <tr>
+          <td>100 KB</td>
+          <td>600 us</td>
+          <td>25.3 us</td>
+          <td>163 MB/s</td>
+          <td>576 us</td>
+          <td>23.9 us</td>
+          <td>170 MB/s</td>
+        </tr>
+        <tr>
+          <td>1 MB</td>
+          <td>3.95 ms</td>
+          <td>255 us</td>
+          <td>253 MB/s</td>
+          <td>3.93 ms</td>
+          <td>78.3 us</td>
+          <td>254 MB/s</td>
+        </tr>
+      </tbody>
+    </table>
+
+    <p>
+      Several patterns emerge from these measurements. First, the 1 KB data points exhibit high variance (136 us stddev for seal, 2.79 ms stddev for open), attributable to Python interpreter startup overhead and JIT compilation in the cryptographic C extensions being amortized differently across short-duration runs. Second, at 10 KB and above, the variance stabilizes and throughput increases monotonically, reaching 253 MB/s (seal) and 254 MB/s (open) at 1 MB. This convergence toward a common throughput reflects the fact that both operations are dominated at large sizes by the same primitive: XChaCha20-Poly1305, which processes data at a rate determined by libsodium's stream cipher implementation.
+    </p>
+    <p>
+      The constant-overhead component (X25519 key agreement, Ed25519 signing/verification, HKDF derivation, manifest serialization) accounts for approximately 200 to 300 microseconds regardless of document size. At 1 KB, this constant overhead dominates. At 1 MB, it is negligible relative to the ~3.7 ms spent in AEAD encryption/decryption. The crossover point, where linear AEAD cost exceeds constant crypto overhead, occurs near 100 KB.
+    </p>
+
+    <!-- ============ 4. Watermark Embedding Overhead ============ -->
+    <h2 id="embedding">3. Watermark Embedding Overhead</h2>
+    <p>
+      Watermark embedding occurs before the cryptographic seal. The following table reports the seal time with and without watermarking, isolating the overhead attributable to watermark insertion.
+    </p>
+
+    <table>
+      <thead>
+        <tr>
+          <th>Size</th>
+          <th>Seal (no watermark)</th>
+          <th>Seal (with watermark)</th>
+          <th>Overhead</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>1 KB</td>
+          <td>297 us</td>
+          <td>305 us</td>
+          <td>+2.6%</td>
+        </tr>
+        <tr>
+          <td>10 KB</td>
+          <td>325 us</td>
+          <td>471 us</td>
+          <td>+44.8%</td>
+        </tr>
+        <tr>
+          <td>100 KB</td>
+          <td>627 us</td>
+          <td>2.76 ms</td>
+          <td>+340%</td>
+        </tr>
+        <tr>
+          <td>1 MB</td>
+          <td>4.07 ms</td>
+          <td>23.78 ms</td>
+          <td>+484%</td>
+        </tr>
+      </tbody>
+    </table>
+
+    <p>
+      The percentage overhead grows with document size because watermark embedding is O(n) in text length while the constant cryptographic cost is amortized over the same range. At 1 KB the watermark adds only 8 microseconds (within measurement noise); at 1 MB it adds 19.7 milliseconds. Despite the large percentage increase, the absolute overhead at 1 MB (23.78 ms total) remains well below any interactive latency threshold.
+    </p>
+
+    <h3>3.1 Per-Layer Breakdown</h3>
+    <p>
+      Isolating each watermark layer reveals that L3 semantic processing dominates the embedding cost at all document sizes.
+    </p>
+
+    <table>
+      <thead>
+        <tr>
+          <th>Size</th>
+          <th>L1 (Zero-Width)</th>
+          <th>L2 (Whitespace)</th>
+          <th>L3 (Semantic)</th>
+          <th>All Layers</th>
+          <th>L3 Share</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>1 KB</td>
+          <td>230 us</td>
+          <td>20.5 us</td>
+          <td>1.39 ms</td>
+          <td>1.61 ms</td>
+          <td>86%</td>
+        </tr>
+        <tr>
+          <td>10 KB</td>
+          <td>1.88 ms</td>
+          <td>66 us</td>
+          <td>12.5 ms</td>
+          <td>13.9 ms</td>
+          <td>90%</td>
+        </tr>
+        <tr>
+          <td>100 KB</td>
+          <td>19.5 ms</td>
+          <td>401 us</td>
+          <td>122 ms</td>
+          <td>141 ms</td>
+          <td>87%</td>
+        </tr>
+        <tr>
+          <td>1 MB</td>
+          <td>213 ms</td>
+          <td>3.72 ms</td>
+          <td>1.21 s</td>
+          <td>1.42 s</td>
+          <td>85%</td>
+        </tr>
+      </tbody>
+    </table>
+
+    <p>
+      L3 accounts for 85 to 90% of total embedding time across all sizes. Its cost is driven by five sequential regex-based passes over the text (synonym rotation, punctuation, spelling, contractions, number formatting), each of which performs word-boundary scanning and dictionary lookup. L1 is the second-largest contributor, scaling linearly because it inserts a 66-character zero-width frame every 40 visible characters, requiring O(n) string concatenation. L2 is the cheapest layer by an order of magnitude because it modifies at most 64 lines regardless of document length, making it effectively O(1) for documents longer than approximately 200 lines.
+    </p>
+
+    <!-- ============ 5. Watermark Extraction Performance ============ -->
+    <h2 id="extraction">4. Watermark Extraction Performance</h2>
+    <p>
+      Extraction is the inverse of embedding: given a text that may contain watermarks, recover candidate mark_ids. Two API entry points exist: <code>recover_marks()</code> (v1, extracts L1 and L2 candidates) and <code>recover_marks_v2()</code> (adds L3 candidate verification against a provided list of candidate mark_ids).
+    </p>
+
+    <table>
+      <thead>
+        <tr>
+          <th>Size</th>
+          <th>recover_marks()</th>
+          <th>recover_marks_v2() (no L3 candidates)</th>
+          <th>recover_marks_v2() (with L3 candidate)</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>1 KB</td>
+          <td>1.24 ms</td>
+          <td>1.25 ms</td>
+          <td>2.25 ms</td>
+        </tr>
+        <tr>
+          <td>10 KB</td>
+          <td>12.8 ms</td>
+          <td>12.8 ms</td>
+          <td>21.9 ms</td>
+        </tr>
+        <tr>
+          <td>100 KB</td>
+          <td>128 ms</td>
+          <td>126 ms</td>
+          <td>217 ms</td>
+        </tr>
+        <tr>
+          <td>1 MB</td>
+          <td>1.31 s</td>
+          <td>1.32 s</td>
+          <td>2.25 s</td>
+        </tr>
+      </tbody>
+    </table>
+
+    <p>
+      Without L3 candidate verification, the v1 and v2 APIs perform identically (within measurement noise), as both perform the same L1 and L2 extraction passes. Adding a single L3 candidate for verification approximately doubles the extraction time because <code>verify_semantic()</code> must scan the full text against the 151-class synonym dictionary and score the observed choices against the candidate mark_id. The L3 verification cost scales linearly with text length and linearly with the number of candidates tested. For attribution workflows where the registry contains thousands of mark_ids, a pre-filtering step (using L1 or L2 recovery to narrow the candidate set) is essential to avoid O(n * k) scaling where k is the candidate count.
+    </p>
+    <p>
+      The L3 verification times from the benchmark confirm this linear relationship:
+    </p>
+
+    <table>
+      <thead>
+        <tr>
+          <th>Size</th>
+          <th>L3 Verify (correct mark_id)</th>
+          <th>L3 Verify (wrong mark_id)</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>1 KB</td>
+          <td>961 us</td>
+          <td>958 us</td>
+        </tr>
+        <tr>
+          <td>10 KB</td>
+          <td>9.10 ms</td>
+          <td>9.22 ms</td>
+        </tr>
+        <tr>
+          <td>100 KB</td>
+          <td>90.5 ms</td>
+          <td>90.3 ms</td>
+        </tr>
+        <tr>
+          <td>1 MB</td>
+          <td>986 ms</td>
+          <td>945 ms</td>
+        </tr>
+      </tbody>
+    </table>
+
+    <p>
+      Verification time is independent of whether the candidate mark_id is correct or incorrect, as the algorithm must scan the full text and score all synonym-class instances in both cases. The time per verification is approximately 1 ms/KB, or equivalently ~1 second per megabyte of text. For a 10 KB document with 100 candidates to test, the total attribution time would be approximately 0.9 seconds, which is acceptable for forensic use.
+    </p>
+
+    <!-- ============ 6. Content Fingerprint Cost ============ -->
+    <h2 id="fingerprint">5. Content Fingerprint Cost</h2>
+    <p>
+      Content fingerprinting runs once during seal (to store the fingerprint in the registry) and once during attribution (to compare the leaked document against stored fingerprints). The <code>ContentFingerprint.from_text()</code> function computes winnowing hashes over character k-grams and SHA-256 sentence hashes over sorted content words.
+    </p>
+
+    <table>
+      <thead>
+        <tr>
+          <th>Size</th>
+          <th>Fingerprint Time</th>
+          <th>Stddev</th>
+          <th>Winnowing Hashes</th>
+          <th>Sentence Hashes</th>
+          <th>Rate</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>1 KB</td>
+          <td>3.37 ms</td>
+          <td>76 us</td>
+          <td>378</td>
+          <td>14</td>
+          <td>290 KB/s</td>
+        </tr>
+        <tr>
+          <td>10 KB</td>
+          <td>32.0 ms</td>
+          <td>105 us</td>
+          <td>477</td>
+          <td>146</td>
+          <td>306 KB/s</td>
+        </tr>
+        <tr>
+          <td>100 KB</td>
+          <td>321 ms</td>
+          <td>1.68 ms</td>
+          <td>477</td>
+          <td>1,451</td>
+          <td>304 KB/s</td>
+        </tr>
+        <tr>
+          <td>1 MB</td>
+          <td>3.35 s</td>
+          <td>27.6 ms</td>
+          <td>477</td>
+          <td>14,862</td>
+          <td>306 KB/s</td>
+        </tr>
+      </tbody>
+    </table>
+
+    <p>
+      Content fingerprinting is the most expensive per-byte operation in the Oversight pipeline, processing at approximately 300 KB/s (3.35 s/MB). The cost is dominated by the rolling hash computation in the winnowing algorithm, which computes one MD5 hash per k-gram position. The winnowing hash count plateaus at 477 for documents above 10 KB because the window-based selection algorithm converges to a stable density of selected hashes. Sentence hash counts scale linearly with document length, as expected, reaching 14,862 for a 1 MB document (approximately one hash per 70 bytes, corresponding to an average sentence length of roughly 15 words).
+    </p>
+    <p>
+      The fingerprint computation runs once at seal time and does not affect interactive latency for the seal operation itself (it can be computed asynchronously after the sealed file is written). At attribution time, the same computation runs on the leaked document. For a 100 KB leaked document, the 321 ms fingerprint computation time is imperceptible. For 1 MB documents, the 3.35-second cost is noticeable but acceptable for a forensic workflow that is not time-critical.
+    </p>
+
+    <!-- ============ 7. File Size Overhead ============ -->
+    <h2 id="size">6. File Size Overhead</h2>
+    <p>
+      Watermark embedding and sealed container packaging both increase the stored file size. The following table reports the measured byte counts at each stage.
+    </p>
+
+    <table>
+      <thead>
+        <tr>
+          <th>Nominal</th>
+          <th>Plaintext</th>
+          <th>Sealed (no WM)</th>
+          <th>Container Overhead</th>
+          <th>Watermarked Text</th>
+          <th>WM Expansion</th>
+          <th>WM + Sealed</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>1 KB</td>
+          <td>1,024 B</td>
+          <td>2,148 B</td>
+          <td>+1,124 B</td>
+          <td>6,227 B</td>
+          <td>5.08x</td>
+          <td>7,330 B</td>
+        </tr>
+        <tr>
+          <td>10 KB</td>
+          <td>10,240 B</td>
+          <td>11,365 B</td>
+          <td>+1,125 B</td>
+          <td>63,576 B</td>
+          <td>5.21x</td>
+          <td>64,680 B</td>
+        </tr>
+        <tr>
+          <td>100 KB</td>
+          <td>102,400 B</td>
+          <td>103,526 B</td>
+          <td>+1,126 B</td>
+          <td>635,500 B</td>
+          <td>5.21x</td>
+          <td>636,605 B</td>
+        </tr>
+        <tr>
+          <td>1 MB</td>
+          <td>1,048,576 B</td>
+          <td>1,049,703 B</td>
+          <td>+1,127 B</td>
+          <td>6,506,689 B</td>
+          <td>5.20x</td>
+          <td>6,507,795 B</td>
+        </tr>
+      </tbody>
+    </table>
+
+    <p>
+      The sealed container format adds a fixed overhead of approximately 1,125 bytes across all document sizes. This overhead comprises the 6-byte magic sequence (<code>OVSGHT</code>), the 2-byte header (version and suite ID), the manifest JSON (approximately 500 bytes for a typical seal), the wrapped DEK JSON (approximately 150 bytes), the 24-byte AEAD nonce, and the 16-byte Poly1305 authentication tag. At 1 MB, this fixed overhead is 0.1% of the plaintext size.
+    </p>
+    <p>
+      The watermark text expansion is the dominant size contributor, measured at approximately 5.2x across all tested sizes. L1 is responsible for nearly all of this expansion. Each zero-width character (U+200B, U+200C, or U+200D) occupies 3 bytes in UTF-8 encoding, and L1 inserts a 66-character frame (198 bytes in UTF-8) every 40 visible characters. This yields a theoretical expansion ratio of approximately (40 + 198) / 40 = 5.95x for L1 alone, slightly reduced in practice because not every position receives a full frame. L2 adds at most 64 bytes (one per modified line), and L3 produces near-zero net size change because synonym substitutions replace words with alternatives of similar length.
+    </p>
+    <p>
+      If the 5.2x expansion is unacceptable for a given deployment, L1 density can be reduced (e.g., one frame per 100 visible characters instead of 40), trading redundancy for size. A future optimization is under consideration: encoding the L1 frame in a binary-packed format using only two zero-width characters (reducing from 3 to 2 characters per bit), which would decrease L1's contribution by approximately 33%.
+    </p>
+
+    <!-- ============ 8. ECC Performance ============ -->
+    <h2 id="ecc">7. ECC Performance</h2>
+    <p>
+      The error-correcting code module uses a repetition code with majority-vote decoding to protect L3 synonym bits against partial bit errors from paraphrasing. ECC operations are performed on the mark_id payload before embedding (encode) and after extraction (decode). The following table reports timing for R=7 (the default configuration), which produces 448 coded bits from a 64-bit (8-byte) payload.
+    </p>
+
+    <table>
+      <thead>
+        <tr>
+          <th>Payload Size</th>
+          <th>Coded Bits</th>
+          <th>Encode Mean</th>
+          <th>Encode Stddev</th>
+          <th>Decode Mean</th>
+          <th>Decode Stddev</th>
+          <th>Decode w/ 20% Errors</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>8 bytes (64-bit mark_id)</td>
+          <td>448</td>
+          <td>23.6 us</td>
+          <td>1.0 us</td>
+          <td>50.8 us</td>
+          <td>0.7 us</td>
+          <td>51.5 us</td>
+        </tr>
+        <tr>
+          <td>16 bytes (128-bit mark_id)</td>
+          <td>896</td>
+          <td>44.6 us</td>
+          <td>1.1 us</td>
+          <td>99.8 us</td>
+          <td>0.5 us</td>
+          <td>104 us</td>
+        </tr>
+        <tr>
+          <td>32 bytes (256-bit mark_id)</td>
+          <td>1,792</td>
+          <td>85.2 us</td>
+          <td>0.8 us</td>
+          <td>202 us</td>
+          <td>10.9 us</td>
+          <td>206 us</td>
+        </tr>
+      </tbody>
+    </table>
+
+    <p>
+      All ECC operations complete in sub-100-microsecond time for the standard 64-bit payload, and sub-250 microseconds even for an extended 256-bit payload. The decode operation takes roughly twice as long as encode because it must compute majority votes across each group of R bits. The presence of 20% random bit errors does not measurably increase decode time, confirming that the majority-vote computation is dominated by the iteration overhead rather than by error-correction logic.
+    </p>
+    <p>
+      ECC overhead is negligible relative to all other pipeline stages. At 51 microseconds for decode (the more expensive direction), it represents less than 0.004% of the total extraction time for a 1 MB document (1.31 seconds). The decision to use a repetition code rather than an algebraic code (BCH, Reed-Solomon) was driven by implementation simplicity rather than performance: both approaches would be sub-millisecond at these payload sizes.
+    </p>
+
+    <!-- ============ 9. Optimization Targets ============ -->
+    <h2 id="optimization">8. Optimization Targets</h2>
+    <p>
+      The benchmark data identifies three primary optimization targets for the Python reference implementation.
+    </p>
+    <p>
+      <strong>L3 regex replacement.</strong> L3 accounts for 85% of watermark embedding time and is bottlenecked by five sequential regex passes over the full text. The synonym rotation pass alone (T1) compiles 151 regex patterns and applies each one. Precompiling all patterns into a single alternation regex, or replacing the regex engine with a direct string scan using a prefix trie, would reduce L3's per-pass cost. The Rust port already uses compiled regex via the <code>regex</code> crate with Aho-Corasick multi-pattern matching, which is expected to provide a 10 to 20x speedup.
+    </p>
+    <p>
+      <strong>L1 density reduction.</strong> L1 is responsible for the 5.2x file size expansion through insertion of zero-width character frames every 40 visible characters. Reducing the insertion density to every 100 or 200 characters would cut the expansion to approximately 2.5x or 1.6x respectively, at the cost of fewer redundant frames for recovery. For most documents, the lost redundancy is acceptable because L1 recovery is binary (either the frames are present or they are not) and one complete frame is sufficient for full mark_id extraction.
+    </p>
+    <p>
+      <strong>Winnowing k-gram computation.</strong> Content fingerprinting at 3.35 s/MB is the slowest per-byte operation in the pipeline. The bottleneck is the rolling hash computation, which currently uses Python's <code>hashlib.md5()</code> for each k-gram position. Switching to a polynomial rolling hash (Rabin fingerprint) computed in a single pass would reduce this to a constant-factor improvement. Alternatively, the fingerprinting computation can be deferred to an asynchronous post-seal task, removing it from the critical path entirely.
+    </p>
+
+    <!-- ============ 10. Comparison with Related Systems ============ -->
+    <h2 id="comparison">9. Comparison with Related Systems</h2>
+    <p>
+      No direct, apples-to-apples benchmark comparison is possible between Oversight and existing commercial systems (C2PA, Digimarc) because those systems are proprietary, target different media types (primarily images and video), and do not publish comparable benchmark data. The following qualitative comparison situates Oversight's performance characteristics within the broader landscape.
+    </p>
+
+    <table>
+      <thead>
+        <tr>
+          <th>Property</th>
+          <th>Oversight (v0.4.4, Python)</th>
+          <th>C2PA</th>
+          <th>Digimarc</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>Primary target</td>
+          <td>Text documents</td>
+          <td>Images, video, audio, documents</td>
+          <td>Images, packaging, audio</td>
+        </tr>
+        <tr>
+          <td>Watermark type</td>
+          <td>Multi-layer (formatting + semantic)</td>
+          <td>None (metadata-only provenance)</td>
+          <td>Spatial-domain imperceptible marks</td>
+        </tr>
+        <tr>
+          <td>Survives metadata stripping</td>
+          <td>Yes (L3 is in content words)</td>
+          <td>No (provenance is metadata)</td>
+          <td>Yes (marks are in pixel data)</td>
+        </tr>
+        <tr>
+          <td>Cryptographic sealing</td>
+          <td>AEAD encryption + signature</td>
+          <td>Signature chain (no encryption)</td>
+          <td>No cryptographic sealing</td>
+        </tr>
+        <tr>
+          <td>Transparency logging</td>
+          <td>RFC 6962 Merkle tree</td>
+          <td>Cloud-based verification</td>
+          <td>Proprietary registry</td>
+        </tr>
+        <tr>
+          <td>Open specification</td>
+          <td>Yes (Apache 2.0)</td>
+          <td>Yes (open standard)</td>
+          <td>No (proprietary)</td>
+        </tr>
+        <tr>
+          <td>Recipient binding</td>
+          <td>Per-recipient encryption + watermark</td>
+          <td>No per-recipient binding</td>
+          <td>No per-recipient binding</td>
+        </tr>
+        <tr>
+          <td>Post-quantum readiness</td>
+          <td>ML-KEM-768 + ML-DSA-65 (hybrid suite)</td>
+          <td>Not specified</td>
+          <td>Not specified</td>
+        </tr>
+      </tbody>
+    </table>
+
+    <p>
+      C2PA and Oversight address related but distinct problems. C2PA provides a provenance chain for digital media, recording the editing history through cryptographic signatures on metadata. It does not watermark the content itself, and all provenance data is lost when metadata is stripped. Oversight embeds attribution signals directly into the content, providing forensic traceability that survives metadata removal. The two systems are potentially complementary: a C2PA provenance chain could wrap an Oversight-sealed document, providing both editing-history provenance and per-recipient attribution.
+    </p>
+    <p>
+      Digimarc operates in a fundamentally different domain (spatial-domain marks in images and packaging) and is not directly comparable to a text watermarking system. Its marks survive printing and scanning, a capability that is analogous to Oversight's L3 surviving OCR. Both systems face the same fundamental limitation: marks embedded in the content survive content-preserving transformations but not content-altering ones (cropping for images, paraphrasing for text).
+    </p>
+
+    <hr>
+    <p style="color:var(--text-muted);font-size:14px;">
+      Performance measurements from Oversight v0.4.4 on Intel Core i7, CPython 3.14.2, Windows 10.
+      The benchmark script (<code>bench_usenix.py</code>) and full raw data are available in the
+      <a href="https://github.com/oversight-protocol/oversight">repository</a>.
+    </p>
+
+  </div>
+</main>
+
+<footer class="site-footer">
+  <div class="container">
+    <p>Oversight Protocol &copy; 2026 Zion Boggan. Apache 2.0 License.</p>
+    <p style="color:var(--text-muted);font-size:13px;">Co-authored with Claude Opus 4.6 and 4.7 (Anthropic).</p>
+    <p><a href="https://github.com/oversight-protocol/oversight">GitHub</a></p>
+  </div>
+</footer>
+
+<script src="../js/nav.js" defer></script>
+</body>
+</html>

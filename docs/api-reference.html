@@ -1,0 +1,695 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>API Reference | Oversight Protocol</title>
+  <meta name="description" content="Python API reference for oversight_core: seal/open, watermarking, semantic marks, fingerprinting, ECC, manifest, and cryptographic primitives.">
+  <meta name="author" content="Zion Boggan">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="../css/style.css">
+</head>
+<body>
+
+<nav class="site-nav">
+  <div class="nav-inner">
+    <a href="../" class="nav-brand"><span>Oversight</span> Protocol</a>
+    <ul class="nav-links">
+      <li><a href="../">Home</a></li>
+      <li><a href="../demo/">Demo</a></li>
+      <li><a href="../viewer/">Inspect</a></li>
+      <li><a href="../docs/" class="active">Docs</a></li>
+      <li><a href="../research/">Research</a></li>
+      <li><a href="../blog/">Blog</a></li>
+      <li><a href="../about.html">About</a></li>
+    </ul>
+  </div>
+</nav>
+
+<main>
+  <div class="container">
+    <div class="page-header">
+      <h1>API Reference</h1>
+      <p class="subtitle">Python API documentation for <code>oversight_core</code> v0.4.5</p>
+    </div>
+
+    <p style="color:var(--text-muted);font-size:14px;">
+      Zion Boggan &middot; April 2026 &middot; Oversight Protocol v0.4.5
+    </p>
+
+    <p>
+      The <code>oversight_core</code> package exposes the full seal/open pipeline, watermark
+      embedding and recovery, semantic marking, content fingerprinting, error-correcting codes,
+      manifest construction, and cryptographic primitives. All public symbols are importable
+      from the top-level package or from their respective submodules. This reference covers
+      the Python implementation; the Rust API mirrors these interfaces but uses native types
+      and ownership semantics.
+    </p>
+
+    <!-- Table of Contents -->
+    <h2 id="contents">Contents</h2>
+    <p>
+      <a href="#container">container</a> (seal, open_sealed) &middot;
+      <a href="#watermark">watermark</a> (L1/L2 marks, fusion) &middot;
+      <a href="#semantic">semantic</a> (L3 marks) &middot;
+      <a href="#fingerprint">fingerprint</a> (content identification) &middot;
+      <a href="#ecc">ecc</a> (error correction) &middot;
+      <a href="#manifest">manifest</a> (metadata binding) &middot;
+      <a href="#crypto">crypto</a> (primitives)
+    </p>
+
+    <!-- ============ container ============ -->
+    <h2 id="container">container</h2>
+    <p>
+      The <code>container</code> module implements the binary <code>.sealed</code> format
+      and exposes the two primary entry points for the protocol: <code>seal()</code> and
+      <code>open_sealed()</code>. It also provides the <code>SealedFile</code> dataclass
+      for low-level access to the container fields.
+    </p>
+
+    <h3 id="seal">seal()</h3>
+    <table>
+      <thead>
+        <tr><th>Parameter</th><th>Type</th><th>Description</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td><code>plaintext</code></td>
+          <td><code>bytes</code></td>
+          <td>Raw content to encrypt. Watermarking, if desired, must be applied before calling seal.</td>
+        </tr>
+        <tr>
+          <td><code>manifest</code></td>
+          <td><code>Manifest</code></td>
+          <td>Pre-populated manifest. <code>content_hash</code> must equal <code>sha256(plaintext)</code> and <code>size_bytes</code> must equal <code>len(plaintext)</code>.</td>
+        </tr>
+        <tr>
+          <td><code>issuer_ed25519_priv</code></td>
+          <td><code>bytes</code> (32)</td>
+          <td>Issuer's Ed25519 private key seed for signing the manifest.</td>
+        </tr>
+        <tr>
+          <td><code>recipient_x25519_pub</code></td>
+          <td><code>bytes</code> (32)</td>
+          <td>Recipient's X25519 public key. Must match <code>manifest.recipient.x25519_pub</code>.</td>
+        </tr>
+      </tbody>
+    </table>
+    <p><strong>Returns:</strong> <code>bytes</code> containing the complete <code>.sealed</code> binary blob.</p>
+    <p>
+      The function signs the manifest with Ed25519, generates a random 256-bit DEK, wraps
+      the DEK via ECIES (X25519 + HKDF-SHA256 + XChaCha20-Poly1305), encrypts the plaintext
+      with XChaCha20-Poly1305 using the manifest's content hash as AAD, and assembles the
+      container. Raises <code>ValueError</code> if any precondition is violated.
+    </p>
+
+    <h3 id="open_sealed">open_sealed()</h3>
+    <table>
+      <thead>
+        <tr><th>Parameter</th><th>Type</th><th>Description</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td><code>blob</code></td>
+          <td><code>bytes</code></td>
+          <td>The <code>.sealed</code> file contents.</td>
+        </tr>
+        <tr>
+          <td><code>recipient_x25519_priv</code></td>
+          <td><code>bytes</code> (32)</td>
+          <td>Recipient's X25519 private key for DEK unwrapping.</td>
+        </tr>
+        <tr>
+          <td><code>trusted_issuer_pubs</code></td>
+          <td><code>Optional[set[str]]</code></td>
+          <td>If provided, the issuer's Ed25519 public key (hex) must be in this set. Rejects unknown issuers.</td>
+        </tr>
+        <tr>
+          <td><code>policy_ctx</code></td>
+          <td><code>Optional[PolicyContext]</code></td>
+          <td>Runtime context for policy enforcement (clock, IP, open counter state).</td>
+        </tr>
+      </tbody>
+    </table>
+    <p><strong>Returns:</strong> <code>tuple[bytes, Manifest]</code> containing the decrypted plaintext and the parsed, verified manifest.</p>
+    <p>
+      Verification order is: parse container, verify Ed25519 signature, check trusted-issuer
+      list, enforce time/jurisdiction/max_opens policy, unwrap DEK, AEAD decrypt, and
+      post-decrypt SHA-256 content hash check. Raises <code>ValueError</code> on any
+      integrity failure and <code>PolicyViolation</code> if policy constraints are not met.
+      For multi-recipient containers, all wrapped DEK slots are tried until one succeeds.
+    </p>
+
+    <h3 id="sealedfile">SealedFile</h3>
+    <p>
+      A dataclass representing the parsed binary container. Fields: <code>manifest</code>
+      (Manifest), <code>wrapped_dek</code> (dict), <code>aead_nonce</code> (bytes, 24),
+      <code>ciphertext</code> (bytes), <code>suite_id</code> (int, default 1 for CLASSIC_V1).
+      Provides <code>to_bytes()</code> for serialization and <code>from_bytes(data)</code>
+      for parsing with length-field validation against DoS caps (4 MB manifest, 1 MB wrapped
+      DEK, 4 GB ciphertext).
+    </p>
+
+    <!-- ============ watermark ============ -->
+    <h2 id="watermark">watermark</h2>
+    <p>
+      The <code>watermark</code> module handles L1 (zero-width Unicode) and L2 (trailing
+      whitespace) watermark embedding and extraction, as well as high-level multi-layer
+      application, recovery, and fusion. L3 semantic marks are delegated to the
+      <code>semantic</code> module but accessible through <code>apply_all()</code> and
+      <code>verify_l3()</code> here.
+    </p>
+
+    <h3>new_mark_id()</h3>
+    <table>
+      <thead><tr><th>Parameter</th><th>Type</th><th>Description</th></tr></thead>
+      <tbody>
+        <tr><td><code>n_bytes</code></td><td><code>int</code> (default 8)</td><td>Length of the mark ID in bytes. 8 bytes (64 bits) is the default.</td></tr>
+      </tbody>
+    </table>
+    <p><strong>Returns:</strong> <code>bytes</code>, a cryptographically random per-recipient mark identifier.</p>
+
+    <h3>embed_zw()</h3>
+    <table>
+      <thead><tr><th>Parameter</th><th>Type</th><th>Description</th></tr></thead>
+      <tbody>
+        <tr><td><code>text</code></td><td><code>str</code></td><td>Input text to watermark.</td></tr>
+        <tr><td><code>mark_id</code></td><td><code>bytes</code></td><td>Per-recipient mark identifier.</td></tr>
+        <tr><td><code>density</code></td><td><code>int</code> (default 40)</td><td>Approximate character interval between redundant mark frames. Lower values insert more copies.</td></tr>
+      </tbody>
+    </table>
+    <p><strong>Returns:</strong> <code>str</code> with zero-width Unicode frames (ZWSP/ZWNJ/ZWJ) inserted at regular intervals.</p>
+
+    <h3>extract_zw()</h3>
+    <table>
+      <thead><tr><th>Parameter</th><th>Type</th><th>Description</th></tr></thead>
+      <tbody>
+        <tr><td><code>text</code></td><td><code>str</code></td><td>Potentially watermarked text.</td></tr>
+        <tr><td><code>mark_len_bytes</code></td><td><code>int</code> (default 8)</td><td>Expected mark ID length in bytes.</td></tr>
+      </tbody>
+    </table>
+    <p><strong>Returns:</strong> <code>list[bytes]</code>, all recovered mark IDs from zero-width frames. May contain duplicates if multiple frames survived.</p>
+
+    <h3>embed_ws() / extract_ws()</h3>
+    <p>
+      L2 trailing-whitespace encoding. <code>embed_ws(text, mark_id)</code> appends a trailing
+      space (bit 0) or tab (bit 1) to lines that have no existing trailing whitespace.
+      <code>extract_ws(text, mark_len_bytes)</code> reads the mark back, returning
+      <code>Optional[bytes]</code> (None if insufficient lines).
+    </p>
+
+    <h3>extract_ws_partial()</h3>
+    <table>
+      <thead><tr><th>Parameter</th><th>Type</th><th>Description</th></tr></thead>
+      <tbody>
+        <tr><td><code>text</code></td><td><code>str</code></td><td>Text with potential L2 marks.</td></tr>
+        <tr><td><code>mark_len_bytes</code></td><td><code>int</code> (default 8)</td><td>Expected mark ID length.</td></tr>
+      </tbody>
+    </table>
+    <p>
+      <strong>Returns:</strong> <code>tuple[Optional[bytes], float, int, int]</code> containing
+      (best_candidate, confidence, bits_recovered, bits_needed). Confidence is the ratio
+      of recovered bits to needed bits. Unknown bits are zero-padded. Partial candidates
+      with confidence &ge; 0.5 are included in fusion scoring.
+    </p>
+
+    <h3>apply_all()</h3>
+    <table>
+      <thead><tr><th>Parameter</th><th>Type</th><th>Description</th></tr></thead>
+      <tbody>
+        <tr><td><code>text</code></td><td><code>str</code></td><td>Input text.</td></tr>
+        <tr><td><code>mark_id</code></td><td><code>bytes</code></td><td>Per-recipient mark identifier (shared across all layers).</td></tr>
+      </tbody>
+    </table>
+    <p>
+      <strong>Returns:</strong> <code>str</code> with all available layers applied.
+      Layer ordering is L3 (semantic) first, then L2 (whitespace), then L1 (zero-width).
+      This ordering prevents L1's invisible characters from fragmenting L3's synonym words.
+    </p>
+
+    <h3>recover_marks()</h3>
+    <table>
+      <thead><tr><th>Parameter</th><th>Type</th><th>Description</th></tr></thead>
+      <tbody>
+        <tr><td><code>text</code></td><td><code>str</code></td><td>Leaked text to analyze.</td></tr>
+        <tr><td><code>mark_len_bytes</code></td><td><code>int</code> (default 8)</td><td>Expected mark ID length.</td></tr>
+      </tbody>
+    </table>
+    <p>
+      <strong>Returns:</strong> <code>dict</code> with keys <code>L1_zero_width</code>,
+      <code>L2_whitespace</code>, <code>L3_synonyms</code>, each containing a list of
+      candidate mark bytes. L3 returns empty because it requires candidate-based verification
+      (see <code>verify_l3</code>).
+    </p>
+
+    <h3>recover_marks_v2()</h3>
+    <table>
+      <thead><tr><th>Parameter</th><th>Type</th><th>Description</th></tr></thead>
+      <tbody>
+        <tr><td><code>text</code></td><td><code>str</code></td><td>Leaked text.</td></tr>
+        <tr><td><code>candidate_mark_ids</code></td><td><code>list[bytes] | None</code></td><td>Known mark IDs from registry for L3 verification. If None, L3 is skipped.</td></tr>
+        <tr><td><code>mark_len_bytes</code></td><td><code>int</code> (default 8)</td><td>Expected mark ID length.</td></tr>
+      </tbody>
+    </table>
+    <p>
+      <strong>Returns:</strong> <code>dict</code> with keys <code>layers</code> (per-layer
+      results and confidence), <code>candidates</code> (fused ranked list of
+      <code>(mark_id, combined_score, evidence_summary)</code> tuples), and
+      <code>diagnostics</code> (human-readable status strings per layer).
+      Fusion uses independence-assumption score combination:
+      <code>combined = 1 - (1-s1)(1-s2)...(1-sN)</code>.
+    </p>
+
+    <h3>verify_l3()</h3>
+    <table>
+      <thead><tr><th>Parameter</th><th>Type</th><th>Description</th></tr></thead>
+      <tbody>
+        <tr><td><code>text</code></td><td><code>str</code></td><td>Text to test.</td></tr>
+        <tr><td><code>candidate_mark_ids</code></td><td><code>list[bytes]</code></td><td>Mark IDs to test against semantic marks in the text.</td></tr>
+        <tr><td><code>threshold</code></td><td><code>float</code> (default 0.70)</td><td>Minimum weighted score for a match.</td></tr>
+      </tbody>
+    </table>
+    <p>
+      <strong>Returns:</strong> <code>list[tuple[bytes, float, dict]]</code> of
+      (mark_id, score, detail_dict) for candidates above the threshold, sorted by
+      score descending. Delegates to <code>semantic.verify_semantic()</code>.
+    </p>
+
+    <!-- ============ semantic ============ -->
+    <h2 id="semantic">semantic</h2>
+    <p>
+      The <code>semantic</code> module implements L3 watermarking: synonym-class rotation,
+      punctuation-style fingerprinting, spelling variants, contraction choices, and number
+      formatting. These marks survive format conversion, invisible-character stripping,
+      and OCR because the signal is encoded in the words and punctuation themselves,
+      not in formatting metadata.
+    </p>
+
+    <h3>apply_semantic()</h3>
+    <table>
+      <thead><tr><th>Parameter</th><th>Type</th><th>Description</th></tr></thead>
+      <tbody>
+        <tr><td><code>text</code></td><td><code>str</code></td><td>Input text.</td></tr>
+        <tr><td><code>mark_id</code></td><td><code>bytes</code></td><td>Per-recipient mark identifier.</td></tr>
+        <tr><td><code>use_v2</code></td><td><code>bool</code> (default True)</td><td>Use the expanded 151-class v2 synonym dictionary. Falls back to the 27-class v1 table if False or if the v2 module is unavailable.</td></tr>
+      </tbody>
+    </table>
+    <p>
+      <strong>Returns:</strong> <code>str</code> with all L3 sublayers applied (synonyms,
+      punctuation, spelling, contractions, number formatting). This is the primary L3
+      embedding entry point.
+    </p>
+
+    <h3>verify_semantic()</h3>
+    <table>
+      <thead><tr><th>Parameter</th><th>Type</th><th>Description</th></tr></thead>
+      <tbody>
+        <tr><td><code>text</code></td><td><code>str</code></td><td>Text to verify.</td></tr>
+        <tr><td><code>candidate_mark_id</code></td><td><code>bytes</code></td><td>The mark ID to test.</td></tr>
+        <tr><td><code>use_v2</code></td><td><code>bool</code> (default True)</td><td>Use v2 dictionary for synonym verification.</td></tr>
+      </tbody>
+    </table>
+    <p>
+      <strong>Returns:</strong> <code>dict</code> with per-sublayer scores
+      (<code>synonyms_score</code>, <code>punctuation_score</code>,
+      <code>spelling_score</code>, <code>contraction_score</code>),
+      per-sublayer hit counts (e.g., <code>"2/3"</code>), a weighted
+      <code>weighted_score</code> (weights: synonyms 0.50, punctuation 0.10,
+      spelling 0.20, contractions 0.20), and an <code>overall_match</code>
+      boolean (True if weighted_score &ge; 0.65).
+    </p>
+
+    <h3>embed_synonyms_v2()</h3>
+    <table>
+      <thead><tr><th>Parameter</th><th>Type</th><th>Description</th></tr></thead>
+      <tbody>
+        <tr><td><code>text</code></td><td><code>str</code></td><td>Input text.</td></tr>
+        <tr><td><code>mark_id</code></td><td><code>bytes</code></td><td>Mark identifier.</td></tr>
+        <tr><td><code>min_instances</code></td><td><code>int</code> (default 8)</td><td>Minimum synonym-class hits required. If the text has fewer, no embedding occurs and the text is returned unchanged.</td></tr>
+      </tbody>
+    </table>
+    <p>
+      <strong>Returns:</strong> <code>str</code> with synonym words replaced according to a
+      deterministic variant sequence derived from <code>mark_id</code> via
+      SHA-256 expansion. Skips URLs, email addresses, file paths, code blocks,
+      hex strings, and base64 content. Falls back to the v1 27-class table if
+      the v2 dictionary is unavailable.
+    </p>
+
+    <h3>embed_spelling()</h3>
+    <table>
+      <thead><tr><th>Parameter</th><th>Type</th><th>Description</th></tr></thead>
+      <tbody>
+        <tr><td><code>text</code></td><td><code>str</code></td><td>Input text.</td></tr>
+        <tr><td><code>mark_id</code></td><td><code>bytes</code></td><td>Mark identifier. Bits 8-32 (offset from punctuation bits) select American vs British spelling for each of 25 variant pairs.</td></tr>
+      </tbody>
+    </table>
+    <p>
+      <strong>Returns:</strong> <code>str</code> with spelling variants applied
+      (e.g., "color"/"colour", "organize"/"organise"). Case-preserving substitution.
+    </p>
+
+    <h3>embed_contractions()</h3>
+    <table>
+      <thead><tr><th>Parameter</th><th>Type</th><th>Description</th></tr></thead>
+      <tbody>
+        <tr><td><code>text</code></td><td><code>str</code></td><td>Input text.</td></tr>
+        <tr><td><code>mark_id</code></td><td><code>bytes</code></td><td>Mark identifier. Bits 40+ select contracted vs expanded form for each of 30 contraction pairs.</td></tr>
+      </tbody>
+    </table>
+    <p>
+      <strong>Returns:</strong> <code>str</code> with contractions expanded or collapsed
+      per the mark_id (e.g., "don't"/"do not", "it's"/"it is").
+    </p>
+
+    <h3>embed_punctuation() / extract_punctuation_bits()</h3>
+    <p>
+      <code>embed_punctuation(text, mark_id)</code> applies three deterministic punctuation
+      choices: bit 0 controls the Oxford comma, bit 1 selects em dash vs double-hyphen,
+      and bit 2 selects curly vs straight quotes. Idempotent.
+      <code>extract_punctuation_bits(text)</code> returns <code>list[int]</code> with the
+      detected bit values (up to 3 bits), based on which style dominates in the text.
+    </p>
+
+    <h3>embed_number_format()</h3>
+    <p>
+      <code>embed_number_format(text, mark_id)</code> applies two number formatting choices:
+      bit 72 controls comma separators in numbers &ge; 1000 ("1,000" vs "1000"),
+      and bit 73 controls percent symbol vs word form ("50%" vs "50 percent").
+    </p>
+
+    <!-- ============ fingerprint ============ -->
+    <h2 id="fingerprint">fingerprint</h2>
+    <p>
+      The <code>fingerprint</code> module provides server-side content identification
+      for leak detection when all embedded watermarks have been stripped. Fingerprints
+      are computed at seal time and stored alongside the manifest or in the registry.
+      They never appear in the document itself, so an adversary cannot strip what is
+      not embedded.
+    </p>
+
+    <h3>ContentFingerprint</h3>
+    <p>
+      The primary class combining winnowing and sentence fingerprints for a document.
+    </p>
+    <table>
+      <thead><tr><th>Attribute</th><th>Type</th><th>Description</th></tr></thead>
+      <tbody>
+        <tr><td><code>winnowing_fp</code></td><td><code>list[int]</code></td><td>Sorted list of selected winnowing hash values.</td></tr>
+        <tr><td><code>sentence_fp</code></td><td><code>list[str]</code></td><td>List of 16-char hex hashes, one per sentence (order-independent within each sentence).</td></tr>
+        <tr><td><code>text_length</code></td><td><code>int</code></td><td>Original text length in characters.</td></tr>
+        <tr><td><code>sentence_count</code></td><td><code>int</code></td><td>Number of detected sentences.</td></tr>
+      </tbody>
+    </table>
+
+    <h3>ContentFingerprint.from_text()</h3>
+    <table>
+      <thead><tr><th>Parameter</th><th>Type</th><th>Description</th></tr></thead>
+      <tbody>
+        <tr><td><code>text</code></td><td><code>str</code></td><td>Source text.</td></tr>
+        <tr><td><code>k</code></td><td><code>int</code> (default 10)</td><td>K-gram size for winnowing (character-level).</td></tr>
+        <tr><td><code>window</code></td><td><code>int</code> (default 4)</td><td>Winnowing window size.</td></tr>
+      </tbody>
+    </table>
+    <p><strong>Returns:</strong> <code>ContentFingerprint</code> instance.</p>
+
+    <h3>ContentFingerprint.similarity()</h3>
+    <table>
+      <thead><tr><th>Parameter</th><th>Type</th><th>Description</th></tr></thead>
+      <tbody>
+        <tr><td><code>other</code></td><td><code>ContentFingerprint</code></td><td>The fingerprint to compare against.</td></tr>
+      </tbody>
+    </table>
+    <p>
+      <strong>Returns:</strong> <code>dict</code> with keys <code>winnowing</code> (Jaccard
+      similarity), <code>sentence</code> (set-overlap fraction), <code>combined</code>
+      (0.4 * winnowing + 0.6 * sentence), and <code>verdict</code> (one of
+      <code>MATCH</code> if &ge; 0.6, <code>LIKELY</code> if &ge; 0.3,
+      <code>UNLIKELY</code> if &ge; 0.1, or <code>NO_MATCH</code>).
+    </p>
+
+    <h3>ContentFingerprint.to_dict() / from_dict()</h3>
+    <p>
+      Serialization and deserialization for storage in the manifest or registry.
+      <code>to_dict()</code> returns a plain dict; <code>from_dict(d)</code> is a classmethod
+      that reconstructs the fingerprint from a stored dict.
+    </p>
+
+    <h3>winnow()</h3>
+    <table>
+      <thead><tr><th>Parameter</th><th>Type</th><th>Description</th></tr></thead>
+      <tbody>
+        <tr><td><code>text</code></td><td><code>str</code></td><td>Input text (will be normalized: lowercased, whitespace collapsed, non-alphanumeric stripped).</td></tr>
+        <tr><td><code>k</code></td><td><code>int</code> (default 10)</td><td>K-gram size.</td></tr>
+        <tr><td><code>window</code></td><td><code>int</code> (default 4)</td><td>Winnowing window size. Smaller windows produce more hashes (higher recall, lower precision).</td></tr>
+      </tbody>
+    </table>
+    <p><strong>Returns:</strong> <code>list[int]</code>, sorted list of selected hash values. Uses MD5 (truncated to 32 bits) as the rolling hash function.</p>
+
+    <h3>sentence_fingerprint()</h3>
+    <table>
+      <thead><tr><th>Parameter</th><th>Type</th><th>Description</th></tr></thead>
+      <tbody>
+        <tr><td><code>text</code></td><td><code>str</code></td><td>Input text.</td></tr>
+      </tbody>
+    </table>
+    <p>
+      <strong>Returns:</strong> <code>list[str]</code> of 16-char hex hashes (SHA-256,
+      truncated). Each hash represents a sentence's sorted content words (words with &gt; 2
+      characters). Sentences with fewer than 3 words are skipped.
+    </p>
+
+    <h3>winnow_similarity() / sentence_similarity()</h3>
+    <p>
+      <code>winnow_similarity(fp1, fp2)</code> computes Jaccard similarity between two
+      winnowing fingerprints (intersection over union of hash sets).
+      <code>sentence_similarity(fp1, fp2)</code> computes the fraction of hashes in
+      <code>fp2</code> that appear in <code>fp1</code>.
+    </p>
+
+    <!-- ============ ecc ============ -->
+    <h2 id="ecc">ecc</h2>
+    <p>
+      The <code>ecc</code> module provides error-correcting codes for watermark bit
+      protection. It implements a repetition-code with majority-vote decoding: each
+      payload bit is repeated R times, and decoding recovers the original bit by majority
+      vote over each group. With R=7 (the default), up to 3 errors per group are corrected,
+      tolerating approximately 40% random bit error rate.
+    </p>
+
+    <h3>encode()</h3>
+    <table>
+      <thead><tr><th>Parameter</th><th>Type</th><th>Description</th></tr></thead>
+      <tbody>
+        <tr><td><code>payload</code></td><td><code>bytes</code></td><td>Raw bytes to protect (typically 8-byte mark_id).</td></tr>
+        <tr><td><code>repetitions</code></td><td><code>int</code> (default 7)</td><td>Odd number of times each bit is repeated. Higher values increase error tolerance at the cost of bandwidth.</td></tr>
+      </tbody>
+    </table>
+    <p><strong>Returns:</strong> <code>list[int]</code> of coded bits. Length = <code>len(payload) * 8 * repetitions</code>.</p>
+
+    <h3>decode()</h3>
+    <table>
+      <thead><tr><th>Parameter</th><th>Type</th><th>Description</th></tr></thead>
+      <tbody>
+        <tr><td><code>coded_bits</code></td><td><code>list[int]</code></td><td>Received bits (may contain errors). Padded or truncated to expected length.</td></tr>
+        <tr><td><code>payload_len</code></td><td><code>int</code> (default 8)</td><td>Expected payload length in bytes.</td></tr>
+        <tr><td><code>repetitions</code></td><td><code>int</code> (default 7)</td><td>Repetition factor used during encoding.</td></tr>
+      </tbody>
+    </table>
+    <p>
+      <strong>Returns:</strong> <code>tuple[bytes, float, int]</code> containing
+      (recovered_payload, confidence, errors_corrected). Confidence is the fraction of
+      groups where the majority vote was unanimous (all bits agreed).
+    </p>
+
+    <h3>verify_with_ecc()</h3>
+    <table>
+      <thead><tr><th>Parameter</th><th>Type</th><th>Description</th></tr></thead>
+      <tbody>
+        <tr><td><code>observed_variant_indices</code></td><td><code>list[int]</code></td><td>Synonym variant indices observed in the text.</td></tr>
+        <tr><td><code>candidate_mark_id</code></td><td><code>bytes</code></td><td>The mark ID to verify.</td></tr>
+        <tr><td><code>class_size</code></td><td><code>int</code> (default 3)</td><td>Number of variants per synonym class.</td></tr>
+        <tr><td><code>repetitions</code></td><td><code>int</code> (default 3)</td><td>ECC repetition factor.</td></tr>
+      </tbody>
+    </table>
+    <p>
+      <strong>Returns:</strong> <code>tuple[bool, float, bytes]</code> containing
+      (match, confidence, decoded_mark_id). Compares the expected variant sequence
+      against observed choices, then either decodes via ECC (if enough bits are
+      available) or falls back to simple ratio matching with a 0.70 threshold.
+    </p>
+
+    <!-- ============ manifest ============ -->
+    <h2 id="manifest">manifest</h2>
+    <p>
+      The <code>manifest</code> module defines the signed metadata that binds a sealed
+      file to its recipient, watermarks, beacons, and policy. The manifest is serialized
+      as canonical JSON (sorted keys, no optional whitespace, null fields omitted) and
+      signed with Ed25519.
+    </p>
+
+    <h3>Manifest</h3>
+    <p>A dataclass with the following fields:</p>
+    <table>
+      <thead><tr><th>Field</th><th>Type</th><th>Description</th></tr></thead>
+      <tbody>
+        <tr><td><code>file_id</code></td><td><code>str</code></td><td>UUID4 identifier for the sealed file.</td></tr>
+        <tr><td><code>issued_at</code></td><td><code>int</code></td><td>Unix timestamp (seconds) when the manifest was created.</td></tr>
+        <tr><td><code>version</code></td><td><code>str</code></td><td>Protocol version string, e.g., <code>"OVERSIGHT-v1"</code>.</td></tr>
+        <tr><td><code>suite</code></td><td><code>str</code></td><td>Algorithm suite identifier (<code>"OSGT-CLASSIC-v1"</code> or <code>"OSGT-HYBRID-v1"</code>).</td></tr>
+        <tr><td><code>original_filename</code></td><td><code>str</code></td><td>Original file name at seal time.</td></tr>
+        <tr><td><code>content_hash</code></td><td><code>str</code></td><td>SHA-256 hex digest of the plaintext.</td></tr>
+        <tr><td><code>content_type</code></td><td><code>str</code></td><td>MIME type (default <code>"application/octet-stream"</code>).</td></tr>
+        <tr><td><code>size_bytes</code></td><td><code>int</code></td><td>Plaintext size in bytes.</td></tr>
+        <tr><td><code>issuer_id</code></td><td><code>str</code></td><td>Stable identifier for the issuer.</td></tr>
+        <tr><td><code>issuer_ed25519_pub</code></td><td><code>str</code></td><td>Issuer's Ed25519 public key (hex).</td></tr>
+        <tr><td><code>recipient</code></td><td><code>Optional[Recipient]</code></td><td>Recipient binding.</td></tr>
+        <tr><td><code>watermarks</code></td><td><code>list[WatermarkRef]</code></td><td>Per-recipient watermark references.</td></tr>
+        <tr><td><code>beacons</code></td><td><code>list[dict]</code></td><td>Beacon token descriptors.</td></tr>
+        <tr><td><code>policy</code></td><td><code>dict</code></td><td>Policy constraints: <code>not_after</code>, <code>max_opens</code>, <code>jurisdiction</code>, <code>registry_url</code>.</td></tr>
+        <tr><td><code>canonical_content_hash</code></td><td><code>str</code></td><td>Added in v0.4.5. SHA-256 hex digest of the pre-watermark source bytes. Provides a dispute anchor when L3 produces a recipient copy that is textually non-identical to the canonical source.</td></tr>
+        <tr><td><code>l3_policy</code></td><td><code>dict</code></td><td>Added in v0.4.5. Records the L3 safety decision at seal time: <code>mode</code> (<code>off</code>, <code>full</code>, or <code>boilerplate</code>), <code>document_class</code>, and <code>ack</code> (whether the non-identity acknowledgement was given).</td></tr>
+        <tr><td><code>signature_ed25519</code></td><td><code>str</code></td><td>Ed25519 signature over canonical bytes (hex). Filled by <code>sign()</code>.</td></tr>
+        <tr><td><code>signature_ml_dsa</code></td><td><code>str</code></td><td>Reserved for post-quantum ML-DSA-65 signature.</td></tr>
+      </tbody>
+    </table>
+
+    <h3>Manifest.new()</h3>
+    <p>
+      Class method that constructs a new Manifest with a fresh UUID4 file_id and current
+      timestamp. Accepts <code>original_filename</code>, <code>content_hash</code>,
+      <code>size_bytes</code>, <code>issuer_id</code>, <code>issuer_ed25519_pub_hex</code>,
+      <code>recipient</code> (Recipient), <code>registry_url</code>, and optional
+      <code>content_type</code>, <code>not_after</code>, <code>max_opens</code>,
+      <code>jurisdiction</code>.
+    </p>
+
+    <h3>Manifest.sign() / Manifest.verify()</h3>
+    <p>
+      <code>sign(issuer_ed25519_priv: bytes)</code> computes the canonical bytes (excluding
+      signature fields), signs with Ed25519, and stores the hex signature in
+      <code>signature_ed25519</code>.
+      <code>verify() -> bool</code> checks the stored signature against the issuer's
+      public key and the canonical bytes.
+    </p>
+
+    <h3>Manifest.canonical_bytes() / to_json() / from_json()</h3>
+    <p>
+      <code>canonical_bytes()</code> returns the UTF-8 canonical JSON used as the signing
+      input (signature fields set to empty string, null values stripped, keys sorted).
+      <code>to_json()</code> returns the full manifest including signatures.
+      <code>from_json(data: bytes)</code> deserializes from JSON bytes, reconstructing
+      nested <code>Recipient</code> and <code>WatermarkRef</code> objects.
+    </p>
+
+    <h3>Recipient</h3>
+    <table>
+      <thead><tr><th>Field</th><th>Type</th><th>Description</th></tr></thead>
+      <tbody>
+        <tr><td><code>recipient_id</code></td><td><code>str</code></td><td>Stable identifier (email hash, user UUID, etc.).</td></tr>
+        <tr><td><code>x25519_pub</code></td><td><code>str</code></td><td>Recipient's X25519 public key (hex).</td></tr>
+        <tr><td><code>ed25519_pub</code></td><td><code>Optional[str]</code></td><td>Recipient's Ed25519 public key (hex), for verifying recipient acknowledgments.</td></tr>
+      </tbody>
+    </table>
+
+    <h3>WatermarkRef</h3>
+    <table>
+      <thead><tr><th>Field</th><th>Type</th><th>Description</th></tr></thead>
+      <tbody>
+        <tr><td><code>layer</code></td><td><code>str</code></td><td>Layer identifier: <code>"L1_zero_width"</code>, <code>"L2_whitespace"</code>, or <code>"L3_semantic"</code>.</td></tr>
+        <tr><td><code>mark_id</code></td><td><code>str</code></td><td>Hex-encoded per-recipient mark identifier.</td></tr>
+      </tbody>
+    </table>
+
+    <!-- ============ crypto ============ -->
+    <h2 id="crypto">crypto</h2>
+    <p>
+      The <code>crypto</code> module wraps vetted cryptographic primitives with no custom
+      constructions. It uses the <code>cryptography</code> library (OpenSSL backend) for
+      classical operations and <code>oqs-python</code> for post-quantum hooks (ML-KEM-768,
+      ML-DSA-65) when available.
+    </p>
+
+    <h3>ClassicIdentity</h3>
+    <p>
+      A dataclass holding an X25519 keypair (encryption) and an Ed25519 keypair (signing),
+      each as 32-byte raw values. <code>ClassicIdentity.generate()</code> creates a new
+      random identity. <code>public_bundle()</code> returns a dict with hex-encoded public
+      keys suitable for distribution to issuers.
+    </p>
+
+    <h3>content_hash()</h3>
+    <table>
+      <thead><tr><th>Parameter</th><th>Type</th><th>Description</th></tr></thead>
+      <tbody>
+        <tr><td><code>data</code></td><td><code>bytes</code></td><td>Raw content to hash.</td></tr>
+      </tbody>
+    </table>
+    <p><strong>Returns:</strong> <code>str</code>, the SHA-256 hex digest. Used for the manifest's <code>content_hash</code> field and as AEAD additional data.</p>
+
+    <h3>random_dek()</h3>
+    <p><strong>Returns:</strong> <code>bytes</code> (32), a cryptographically random document encryption key for XChaCha20-Poly1305.</p>
+
+    <h3>aead_encrypt() / aead_decrypt()</h3>
+    <p>
+      <code>aead_encrypt(key, plaintext, aad)</code> encrypts with XChaCha20-Poly1305 using
+      a random 24-byte nonce, returning <code>tuple[bytes, bytes]</code> (nonce, ciphertext
+      with tag). <code>aead_decrypt(key, nonce, ciphertext, aad)</code> decrypts and verifies
+      the authentication tag. Raises an exception on tag mismatch.
+    </p>
+
+    <h3>wrap_dek_for_recipient() / unwrap_dek()</h3>
+    <p>
+      ECIES-style DEK wrapping. <code>wrap_dek_for_recipient(dek, recipient_x25519_pub)</code>
+      generates an ephemeral X25519 keypair, performs key agreement, derives a wrapping key
+      via HKDF-SHA256 with info string <code>b"oversight-v1-dek-wrap"</code>, and encrypts
+      the DEK with XChaCha20-Poly1305. Returns a dict with hex-encoded
+      <code>ephemeral_pub</code>, <code>nonce</code>, and <code>wrapped_dek</code>.
+      <code>unwrap_dek(wrapped, recipient_x25519_priv)</code> reverses the operation.
+    </p>
+
+    <h3>sign_manifest() / verify_manifest()</h3>
+    <p>
+      <code>sign_manifest(manifest_bytes, ed25519_priv)</code> returns the Ed25519 signature
+      (bytes). <code>verify_manifest(manifest_bytes, signature, ed25519_pub)</code> returns
+      <code>bool</code>.
+    </p>
+
+    <h3>Post-Quantum Functions</h3>
+    <p>
+      Available when <code>oqs-python</code> is installed (PQ_AVAILABLE = True):
+      <code>pq_kem_keypair()</code>, <code>pq_kem_encap()</code>,
+      <code>pq_kem_decap()</code> for ML-KEM-768, and
+      <code>pq_sig_keypair()</code>, <code>pq_sign()</code>,
+      <code>pq_verify()</code> for ML-DSA-65.
+      <code>hybrid_wrap_dek()</code> combines X25519 and ML-KEM-768 shared secrets
+      (X-wing-style) via HKDF with info string
+      <code>b"oversight-hybrid-v1-dek-wrap"</code>.
+    </p>
+
+    <hr>
+    <p style="color:var(--text-muted);font-size:14px;">
+      This reference documents the Python API as of v0.4.5, including the
+      <code>canonical_content_hash</code> and <code>l3_policy</code> manifest fields and
+      the <code>l3_policy</code> module added in that release. The Rust implementation
+      provides equivalent functionality with native types. Consult the
+      <a href="https://github.com/oversight-protocol/oversight">repository</a> for the
+      latest interfaces.
+    </p>
+
+  </div>
+</main>
+
+<footer class="site-footer">
+  <div class="container">
+    <p>Oversight Protocol &copy; 2026 Zion Boggan. Apache 2.0 License.</p>
+    <p style="color:var(--text-muted);font-size:13px;">Co-authored with Claude Opus 4.6 and 4.7 (Anthropic).</p>
+    <p><a href="https://github.com/oversight-protocol/oversight">GitHub</a></p>
+  </div>
+</footer>
+
+<script src="../js/nav.js" defer></script>
+</body>
+</html>

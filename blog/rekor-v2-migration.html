@@ -1,0 +1,255 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Replacing the Custom Merkle Log with Sigstore Rekor v2 | Oversight Protocol</title>
+  <meta name="description" content="Why Oversight v0.5 is migrating from a self-hosted Merkle tree to Sigstore Rekor v2, the DSSE envelope design, and what this means for auditors.">
+  <meta name="author" content="Zion Boggan">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="../css/style.css">
+</head>
+<body>
+
+<nav class="site-nav">
+  <div class="nav-inner">
+    <a href="../" class="nav-brand"><span>Oversight</span> Protocol</a>
+    <ul class="nav-links">
+      <li><a href="../">Home</a></li>
+      <li><a href="../demo/">Demo</a></li>
+      <li><a href="../viewer/">Inspect</a></li>
+      <li><a href="../docs/">Docs</a></li>
+      <li><a href="../research/">Research</a></li>
+      <li><a href="../blog/" class="active">Blog</a></li>
+      <li><a href="../about.html">About</a></li>
+    </ul>
+  </div>
+</nav>
+
+<main>
+  <div class="container">
+
+    <div class="blog-post-header">
+      <h1>Replacing the Custom Merkle Log with Sigstore Rekor v2</h1>
+      <div class="blog-post-meta">2026-04-19 &middot; Zion Boggan</div>
+    </div>
+
+    <div class="blog-content">
+
+      <p>
+        Oversight v0.4.1 ships with its own transparency log: an RFC 6962 Merkle tree implementation
+        that records every seal event with signed tree heads and inclusion proofs. It works. The
+        implementation is correct (after fixing the left-heavy split bug in v0.4.0). But it has a
+        fundamental problem that I cannot engineer around: nobody trusts my log server.
+      </p>
+
+      <p>
+        When I present a Merkle inclusion proof, an auditor has to trust that my log operator
+        did not tamper with the tree. Consistency proofs help detect tampering after the fact,
+        but only if the auditor was already watching. A newly arriving auditor has no baseline
+        to compare against. They are trusting that I operated honestly from day one, and there
+        is no independent evidence for that claim.
+      </p>
+
+      <p>
+        Sigstore's Rekor v2, which went GA in October 2025, solves this. Rekor is a publicly
+        operated, community-monitored transparency log. Multiple independent monitors watch
+        the log continuously. The signed tree heads are distributed via TUF (The Update Framework),
+        a root-of-trust system designed to survive key compromise. When an Oversight seal event
+        is recorded in Rekor, any auditor can verify its inclusion using standard Sigstore tooling
+        without installing Oversight or trusting my infrastructure.
+      </p>
+
+      <h2>Why DSSE, not hashedrekord</h2>
+
+      <p>
+        Rekor v2 accepts two entry types: <code>hashedrekord</code> and <code>dsse</code>.
+        A <code>hashedrekord</code> entry proves that a specific key signed a specific digest.
+        That is not what Oversight needs to record. An Oversight registration event is a structured
+        attestation: issuer K asserts that mark_id M maps to file_id F with content_hash H,
+        bound to recipient R, under suite S, with policy constraints P. This is a statement about
+        relationships, not a bare signature over a hash.
+      </p>
+
+      <p>
+        DSSE (Dead Simple Signing Envelope) wraps an in-toto v1 statement with a typed predicate.
+        The predicate carries the full registration metadata. The envelope is signed by the issuer's
+        Ed25519 key, the same key that already signs the seal manifest. No new key material
+        is required. No Fulcio or OIDC integration is needed; Oversight uses Rekor's self-managed
+        key mode.
+      </p>
+
+      <p>
+        The predicate type is pinned to a git-tagged URI in the Oversight repository so it resolves
+        to documentation and cannot be squatted by a third party. The payload looks like this:
+      </p>
+
+      <pre><code>{
+  "_type": "https://in-toto.io/Statement/v1",
+  "subject": [{
+    "name": "mark:&lt;mark_id&gt;",
+    "digest": {"sha256": "&lt;content_hash&gt;"}
+  }],
+  "predicateType": "https://github.com/oversight-protocol/oversight/blob/v0.5.0/docs/predicates/registration-v1.md",
+  "predicate": {
+    "predicate_version": 1,
+    "file_id": "&lt;uuid&gt;",
+    "issuer_pubkey_ed25519": "&lt;base64&gt;",
+    "recipient_pubkey_sha256": "&lt;hex&gt;",
+    "suite": "OSGT-CLASSIC-v1",
+    "watermarks": {"L1": true, "L2": true, "L3": true},
+    "registered_at": "&lt;iso8601&gt;"
+  }
+}</code></pre>
+
+      <p>
+        One critical privacy decision: the predicate carries a SHA-256 hash of the recipient's
+        X25519 public key, not the raw key. Without this, anyone watching the public Rekor log
+        could enumerate recipients by public key or correlate marks across different issuers.
+        The raw recipient key stays in the local <code>.sealed</code> bundle, which only the
+        issuer and recipient possess.
+      </p>
+
+      <h2>What changes in the bundle format</h2>
+
+      <p>
+        The evidence bundle (the metadata sidecar that accompanies each sealed file) gains a new
+        <code>tlog_kind</code> field. Pre-v0.5 bundles omit this field or set it to
+        <code>oversight-self-merkle-v1</code>, and verifiers route to the existing
+        <code>tlog.py</code> Merkle tree code. New bundles set <code>tlog_kind</code> to
+        <code>rekor-v2-dsse</code> and include the Rekor-specific fields: the log URL, the
+        base64-encoded <code>TransparencyLogEntry</code> protobuf, the DSSE envelope, the
+        log's public key at write time, and a signed checkpoint (the tree head promoted out of
+        the protobuf so serializers cannot drop it).
+      </p>
+
+      <p>
+        A <code>bundle_schema: 2</code> integer gives pre-v0.5 verifiers a fast rejection path.
+        If a v0.4 client encounters <code>bundle_schema: 2</code>, it fails immediately with
+        "unknown schema version, upgrade" rather than attempting to parse fields it does not
+        understand.
+      </p>
+
+      <h2>Backward compatibility</h2>
+
+      <p>
+        Every existing v0.4.1 <code>.sealed</code> file will continue to parse, open, and verify
+        exactly as it does today. The cross-language conformance tests run against v0.4-era
+        fixtures without modification. The local Merkle tree implementation stays in the codebase
+        as a fallback verifier for old bundles; no writes go through it for new seals.
+      </p>
+
+      <p>
+        The Python and Rust implementations must agree on the canonical JSON ordering of every
+        new field. JCS (JSON Canonicalization Scheme) already enforces this, but the constraint
+        is worth stating explicitly because a divergence here would break cross-language
+        conformance, which is the hardest invariant to restore after the fact.
+      </p>
+
+      <h2>What this buys an auditor</h2>
+
+      <p>
+        Before v0.5, an auditor verifying an Oversight bundle needs Oversight-specific code.
+        They parse the Merkle proof format, check against the self-hosted log's signed tree head,
+        and trust that the log operator (me) did not retroactively insert or remove entries.
+      </p>
+
+      <p>
+        After v0.5, an auditor needs only the <code>sigstore-python</code> library (or Go, Java,
+        etc.) and the DSSE envelope bytes from the bundle. They verify the envelope's Ed25519
+        signature, check the Rekor inclusion proof against the publicly distributed tree head,
+        and confirm that the entry was logged at the claimed time. No Oversight code. No trust
+        in my log infrastructure. The auditor's verification path goes through Sigstore's
+        community-operated trust infrastructure instead.
+      </p>
+
+      <p>
+        This matters most in adversarial contexts. If Oversight is used to attribute a leak and
+        the accused recipient challenges the attribution in a legal or compliance proceeding, the
+        transparency log evidence should not depend on the accuser's infrastructure. Rekor gives
+        us a neutral third party with public monitoring.
+      </p>
+
+      <h2>Implementation scope</h2>
+
+      <p>
+        The migration touches both implementations. On the Python side:
+        <code>oversight_core/rekor.py</code> builds DSSE envelopes and handles the Rekor v2
+        upload via a pure-stdlib HTTP client, with no <code>sigstore-python</code> dependency
+        in the write path. A separate <code>auditor_helper.py</code> wraps <code>sigstore-python</code>
+        for the verify side so auditors can install it independently. On the Rust side: a new
+        <code>oversight-rekor</code> crate mirrors the Python module, using <code>tokio</code>
+        for async upload and the <code>sigstore</code> crate for verify.
+      </p>
+
+      <p>
+        The registry server (<code>registry/server.py</code>) replaces its inline tlog append
+        call with a Rekor upload. The SQLite event index stays, because Rekor v2 has removed its
+        search indexing API. The registry is now the only place that answers "list all marks for
+        issuer X." This is an intentional architectural split: Rekor provides tamper-evidence,
+        the registry provides searchability.
+      </p>
+
+      <p>
+        Three new tests bring the total from 76 to at least 79: an end-to-end Rekor registration
+        test, a backward compatibility test against v0.4 fixtures, and a cross-language Rekor
+        conformance test that uploads from Python and verifies from Rust.
+      </p>
+
+      <h2>Gotchas I am watching for</h2>
+
+      <p>
+        Rekor shards rotate approximately every six months. The current shard is
+        <code>log2025-1</code>. When it freezes, a new shard URL replaces it, but the frozen
+        shard stays read-only for verification. Bundles must record the exact log URL they used
+        at write time. Hardcoding the current shard URL would silently break when Sigstore
+        rotates, so the client discovers the active shard via the TUF trusted root.
+      </p>
+
+      <p>
+        There is no online inclusion proof API in Rekor v2. The proof is bundled into the
+        <code>TransparencyLogEntry</code> returned at write time. If a verifier is missing a
+        proof, they have to fetch tiles from the log and compute it locally. This is a departure
+        from Rekor v1, where proofs were fetched on demand. Oversight handles this by persisting
+        the full entry (including the proof) in the evidence bundle.
+      </p>
+
+      <p>
+        The minimum write timeout is 20 seconds. Rekor v2 is tile-backed and sometimes slow on
+        first writes. The HTTP client configuration in both Python and Rust sets a conservative
+        timeout to avoid premature failures during registration.
+      </p>
+
+      <h2>Timeline</h2>
+
+      <p>
+        The migration is planned for three sessions. Session A builds the DSSE envelope construction
+        and unit tests against fixture data, with no network dependency. Session B wires the
+        registry to upload to the public Rekor instance and runs end-to-end tests. Session C
+        builds the Rust crate, runs cross-language conformance, updates the spec, and ships v0.5.0.
+      </p>
+
+      <p>
+        v0.4.1 stays frozen as the paper artifact safety net for USENIX Security Cycle 2. If the
+        Rekor integration ships before the submission deadline, it goes in as a stretch contribution.
+        If not, the paper describes the v0.4.1 architecture with the Rekor migration as future work.
+        Either way, the protocol does not lose its auditable transparency log; it gains a stronger one.
+      </p>
+
+    </div>
+  </div>
+</main>
+
+<footer class="site-footer">
+  <div class="container">
+    <p>Oversight Protocol &copy; 2026 Zion Boggan. Apache 2.0 License.</p>
+    <p style="color:var(--text-muted);font-size:13px;">Co-authored with Claude Opus 4.6 and 4.7 (Anthropic).</p>
+    <p><a href="https://github.com/oversight-protocol/oversight">GitHub</a></p>
+  </div>
+</footer>
+
+<script src="../js/nav.js" defer></script>
+</body>
+</html>

@@ -1,0 +1,247 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>v0.4.5: L3 Semantic Watermark Safety and GUI Starter | Oversight Protocol</title>
+  <meta name="description" content="Why semantic watermarks change recipient text, when that is unacceptable, and how v0.4.5 makes L3 safe by default. Plus a Tkinter GUI starter on the road to a non-technical user experience.">
+  <meta name="author" content="Zion Boggan">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="../css/style.css">
+</head>
+<body>
+
+<nav class="site-nav">
+  <div class="nav-inner">
+    <a href="../" class="nav-brand"><span>Oversight</span> Protocol</a>
+    <ul class="nav-links">
+      <li><a href="../">Home</a></li>
+      <li><a href="../demo/">Demo</a></li>
+      <li><a href="../viewer/">Inspect</a></li>
+      <li><a href="../docs/">Docs</a></li>
+      <li><a href="../research/">Research</a></li>
+      <li><a href="../blog/" class="active">Blog</a></li>
+      <li><a href="../about.html">About</a></li>
+    </ul>
+  </div>
+</nav>
+
+<main>
+  <div class="container">
+
+    <div class="blog-post-header">
+      <h1>v0.4.5: L3 Semantic Watermark Safety and GUI Starter</h1>
+      <div class="blog-post-meta">2026-04-20 &middot; Zion Boggan &middot; ~9 min read</div>
+    </div>
+
+    <div class="blog-content">
+
+      <p>
+        The most powerful watermark Oversight ships is also the one that changes the document.
+        Layer 3 (L3) encodes the recipient identifier into the <em>wording</em> of the prose: a
+        synonym swap here, an Oxford comma there, a British or American spelling chosen by the
+        deterministic expansion of a 64-bit mark. L3 survives the attacks that defeat L1 and L2,
+        including screenshot-and-OCR, aggressive reformatting, and manual retyping, because it
+        lives in choices the reader does not perceive as choices at all.
+      </p>
+
+      <p>
+        That is exactly why L3 is dangerous. For most prose, a substituted synonym is invisible.
+        For a contract, a regulation, a technical specification, a piece of source code, or a log
+        file, the <em>exact</em> wording is the document. If L3 rewrites a clause, a defined term,
+        or a keyword, the recipient no longer has the document they were meant to receive. This
+        post documents how v0.4.5 makes L3 safe by default, why the acknowledgement flow is
+        non-optional, the collusion limit I refuse to paper over, and the Tkinter GUI starter
+        that begins the path from CLI tool to broadly usable product.
+      </p>
+
+      <h2>The wording-sensitive class problem</h2>
+
+      <p>
+        An L3 synonym rotation treats text as a sequence of word choices governed by 151 synonym
+        classes plus sublayers for punctuation, spelling, contractions, and number formatting.
+        The embedding function is deterministic: given a mark ID and a position, the chosen
+        variant is fixed. Two recipients with different mark IDs receive different wordings of
+        the same semantic content. That is the source of L3's attribution power, and it is also
+        the source of its risk.
+      </p>
+
+      <p>
+        Consider a contract that says <em>"the Licensee shall commence performance within thirty
+        (30) days."</em> L3 might rewrite <em>commence</em> as <em>begin</em> or <em>start</em>,
+        each a valid synonym under the surface linguistics. In ordinary prose that is a rounding
+        error. In a contract, a regulatory filing, or a standards document written under RFC 2119
+        and BCP 14 discipline, that word is the hinge the obligation turns on. In source code or
+        SQL, the substitution may not even parse. In a log or a structured data payload, it breaks
+        downstream consumers silently.
+      </p>
+
+      <p>
+        The honest answer is that L3 must not be applied to these documents by default. v0.4.5
+        introduces a document-class-aware policy in <code>oversight_core/l3_policy.py</code> that
+        defaults L3 off for legal, regulatory, technical-spec, source-code, SQL, log, and
+        structured-data inputs. L1 and L2 remain on, because they do not change visible bytes,
+        and the signed manifest still binds the sealed content to the recipient. What is lost is
+        the paraphrase-resistant attribution that only L3 provides. What is gained is that the
+        recipient's copy <em>is</em> the canonical source, byte for byte.
+      </p>
+
+      <h2>New seal flags and the acknowledgement flow</h2>
+
+      <p>
+        The seal CLI (and the Rich CLI) now take three new flags:
+      </p>
+
+      <ul>
+        <li><code>--l3-mode</code>: one of <code>auto</code>, <code>off</code>, <code>full</code>, or <code>boilerplate</code>.</li>
+        <li><code>--l3-ack</code>: the explicit acknowledgement that L3 will produce a recipient copy whose text is non-identical to the canonical source.</li>
+        <li><code>--document-class</code>: one of the recognized classes (<code>prose</code>, <code>legal</code>, <code>regulatory</code>, <code>technical</code>, <code>source_code</code>, <code>sql</code>, <code>log</code>, <code>structured</code>).</li>
+      </ul>
+
+      <p>
+        <code>auto</code> is the default. It inspects the document class (either provided by the
+        user or detected from content and file extension) and picks the safest mode for that
+        class. For prose and marketing content, <code>auto</code> enables full L3. For contracts
+        and specs, <code>auto</code> enables <code>boilerplate</code> mode, which marks only the
+        header, footer, and cover-page regions where synonym rotation is safe. For source code
+        and logs, <code>auto</code> disables L3 entirely.
+      </p>
+
+      <p>
+        Whenever L3 would rewrite body text, in either <code>full</code> or
+        <code>boilerplate</code> mode, the CLI refuses to seal without <code>--l3-ack</code>.
+        The acknowledgement is not a dialog box that you dismiss without reading. It is a
+        structural gate: the seal path raises an error, prints the non-identity warning, and
+        exits. You pass <code>--l3-ack</code> only when you have read the warning and accepted
+        that the recipient is getting a non-identical copy. That decision is recorded in the
+        manifest under <code>l3_policy</code>, alongside the selected mode and document class,
+        so a later auditor can see that the non-identity was disclosed at seal time.
+      </p>
+
+      <p>
+        The high-level API follows the same discipline. <code>watermark.apply_all()</code> and
+        <code>formats.text.apply()</code> now make L3 opt-in. Library users have to pass
+        <code>l3_mode</code> explicitly; the default path returns L1+L2 watermarked output and
+        never rewrites words. Upgrading to v0.4.5 will not silently turn L3 on for anyone.
+      </p>
+
+      <h2>canonical_content_hash as a dispute anchor</h2>
+
+      <p>
+        Even with every safety gate in place, an L3-sealed copy is textually non-identical to the
+        canonical source. If a dispute later turns on whether the recipient received the exact
+        text of the contract, the answer has to be demonstrable. v0.4.5 adds
+        <code>canonical_content_hash</code> to the manifest: a SHA-256 hash of the original
+        source bytes, computed before any watermarking. The recipient can verify that the
+        non-identity is bounded, that their L3-modified copy derives from a specific canonical
+        source hash both parties agreed to, and a neutral auditor can compare the sealed source
+        archive against that hash. The manifest also records the full <code>l3_policy</code>
+        (mode, document class, ack) so the dispute-resolution posture at seal time is part of
+        the signed record.
+      </p>
+
+      <h2>The collusion limit</h2>
+
+      <p>
+        L3 attribution rests on a uniqueness assumption: the mark ID determines the wording, so
+        two recipient copies differ at the positions where their mark IDs differ. If <em>N</em>
+        recipients collude and diff their copies, they can identify every controlled vocabulary
+        position and canonicalize it, replacing each variant with a single canonical choice,
+        before leaking. The leaked text still carries the original semantic content, but the
+        attribution signal is destroyed. L3 cannot defend against this on its own.
+      </p>
+
+      <p>
+        Pretending otherwise would be dishonest, so v0.4.5's <code>docs/security.md</code> states
+        the limit plainly. Issuers should treat L3 as attribution evidence against ordinary leaks
+        and low-to-medium effort stripping, not as a collusion-resistant watermark. Mitigations
+        under evaluation include per-recipient vocabulary randomization, stronger candidate
+        scoring that models collusion edits, and warnings or thresholds for large recipient sets
+        before L3 is enabled. None of those ship as part of v0.4.5. What ships is the honest
+        labeling and a specific audit trail (<code>canonical_content_hash</code>,
+        <code>l3_policy</code>) that lets a later investigation reconstruct what was claimed at
+        seal time.
+      </p>
+
+      <h2>The GUI starter</h2>
+
+      <p>
+        The roadmap correction for v0.4.5 is blunt: I do not launch Oversight broadly on HN or
+        Reddit while the only interface is a CLI. A provenance protocol whose non-technical
+        recipients cannot open a sealed file is a protocol they will not use. v0.4.5 begins the
+        migration with a Tkinter desktop starter app, invoked with <code>oversight gui</code>,
+        that provides the three first-contact flows a recipient or issuer needs: generate a
+        keypair, seal a file to a recipient, and open a sealed file. The code lives in the
+        standard library Tkinter toolkit, so there is no GUI-specific dependency to install on
+        top of the existing wheel.
+      </p>
+
+      <p>
+        The Tkinter starter is not the launch surface. It is a stepping stone. The public launch
+        sequence is: L3 safety (shipped), GUI and web viewer and drag-drop share workflow,
+        Outlook add-in, one regulated-industry design partner deployment, SOC 2 Type 1 scoping
+        in parallel, and only then a broad public launch. Drive, Box, SharePoint, and Teams
+        plugins are deferred until there is a maintainer or design partner paying for them.
+        FedRAMP is dropped from near-term planning; it is a multi-year program requiring
+        sponsor-agency backing, and Oversight has not earned that yet.
+      </p>
+
+
+      <h2>GUI hardening after fuzz testing</h2>
+
+      <p>
+        A follow-up GUI fuzz pass found that the first Tkinter build was too trusting about
+        local output paths. The patch now blocks seal/open outputs that point at selected input
+        files, refuses to overwrite Oversight private-key JSON, rejects Windows device names,
+        normalizes malformed key and manifest JSON into clean user-facing errors, writes keys
+        atomically, and rejects container suite-byte tamper or trailing bytes after ciphertext.
+        The GUI beacon path also now derives its domain from the configured registry URL and
+        binds beacons to the actual manifest <code>file_id</code>.
+      </p>
+
+      <h2>Dependency floors after a Dependabot follow-up</h2>
+
+      <p>
+        v0.4.5 also raises PyPI and Rust dependency floors after a Dependabot and advisory
+        follow-up pass. The Python minimums are <code>setuptools&gt;=78.1.1</code>,
+        <code>cryptography&gt;=46.0.7</code>, <code>PyNaCl&gt;=1.6.2</code>,
+        <code>pydantic&gt;=2.4.0</code>, <code>python-multipart&gt;=0.0.26</code>,
+        <code>Pillow&gt;=12.2.0</code>, and <code>pypdf&gt;=6.10.2</code>. The Rust
+        manifest floors now include patched minima for <code>sqlx</code>, <code>tokio</code>,
+        <code>rand_core</code>, <code>zip</code>, <code>chrono</code>, <code>regex</code>,
+        <code>once_cell</code>, and <code>tracing-subscriber</code>. Local
+        <code>pip-audit -r requirements.txt</code> is clean, and OSV lower-bound checks are
+        clean for the declared Python and Rust floors.
+      </p>
+
+      <h2>What v0.4.5 is not</h2>
+
+      <p>
+        v0.4.5 does not solve collusion. It does not ship the web viewer. It does not replace
+        the CLI; the Tkinter GUI is a starter, not the launch surface. It does not add a cloud
+        vendor or a hosted service. This is a safety release: a set of opinions about which
+        documents L3 should never touch, a disclosure gate for the ones where it might, a hash
+        in the manifest that lets disputes reach ground truth, and a first step toward an
+        interface that a non-technical recipient can actually use. The next time someone asks
+        whether a semantic watermark can be applied to their contract, the answer is "not by
+        default, and only if you acknowledge what that means." That answer is the point of this
+        release.
+      </p>
+
+    </div>
+  </div>
+</main>
+
+<footer class="site-footer">
+  <div class="container">
+    <p>Oversight Protocol &copy; 2026 Zion Boggan. Apache 2.0 License.</p>
+    <p style="color:var(--text-muted);font-size:13px;">Co-authored with Claude Opus 4.6 and 4.7 (Anthropic).</p>
+    <p><a href="https://github.com/oversight-protocol/oversight">GitHub</a></p>
+  </div>
+</footer>
+
+<script src="../js/nav.js" defer></script>
+</body>
+</html>

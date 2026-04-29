@@ -1,0 +1,102 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Research | Oversight Protocol</title>
+  <meta name="description" content="Technical research and formal analysis of the Oversight protocol for data provenance, watermarking, and leak detection.">
+  <meta name="author" content="Zion Boggan">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="../css/style.css">
+</head>
+<body>
+
+<nav class="site-nav">
+  <div class="nav-inner">
+    <a href="../" class="nav-brand"><span>Oversight</span> Protocol</a>
+    <ul class="nav-links">
+      <li><a href="../">Home</a></li>
+      <li><a href="../demo/">Demo</a></li>
+      <li><a href="../viewer/">Inspect</a></li>
+      <li><a href="../docs/">Docs</a></li>
+      <li><a href="../research/" class="active">Research</a></li>
+      <li><a href="../blog/">Blog</a></li>
+      <li><a href="../about.html">About</a></li>
+    </ul>
+  </div>
+</nav>
+
+<main>
+  <div class="container">
+    <div class="page-header">
+      <h1>Research</h1>
+      <p class="subtitle">Technical analysis and formal documentation of the Oversight protocol</p>
+    </div>
+
+    <p>
+      The research program behind Oversight aims to produce rigorous, peer-reviewable documentation of every
+      design decision in the protocol. Each document below addresses a specific dimension of the system: its
+      cryptographic construction, the resilience of its watermarking layers, or the performance characteristics
+      of its seal and open operations. Where possible, results are presented with enough detail to allow
+      independent reproduction. The long-term goal is a USENIX Security submission covering the full protocol.
+    </p>
+
+    <div class="card-grid">
+
+      <a href="threat-model.html" class="card" style="text-decoration:none;color:inherit;">
+        <h3>Threat Model <span class="badge badge-green">New</span></h3>
+        <p style="color:var(--text-secondary);">
+          Honest companion to the protocol spec. Per-layer watermark survival matrix across
+          screenshot, reformat, manual retype, and vocabulary-attack axes. L3 collusion and
+          canonicalization limits. Passive beacons as telemetry rather than guarantees.
+          Jurisdiction-by-IP as soft policy. What RFC 3161 timestamps actually prove and
+          what they do not.
+        </p>
+      </a>
+
+      <a href="protocol-design.html" class="card" style="text-decoration:none;color:inherit;">
+        <h3>Protocol Design and Construction</h3>
+        <p style="color:var(--text-secondary);">
+          Full technical treatment of the cryptographic construction, threat model, and security arguments.
+          Covers both the classical (OSGT-CLASSIC-v1) and post-quantum hybrid (OSGT-HYBRID-v1) algorithm
+          suites, the container format, watermarking system, transparency logging, and policy enforcement.
+        </p>
+      </a>
+
+      <a href="watermark-resilience.html" class="card" style="text-decoration:none;color:inherit;">
+        <h3>Watermark Resilience Analysis <span class="badge badge-green">New</span></h3>
+        <p style="color:var(--text-secondary);">
+          Empirical evaluation of per-layer watermark survival across eight attack classes, ECC error
+          tolerance under the R=7 repetition code, content fingerprinting as a server-side fallback,
+          Shannon capacity bounds at various paraphrase rates, and an honest assessment of LLM-based
+          stripping via the SIRA attack. Cites 19 papers from 2001 to 2026.
+        </p>
+      </a>
+
+      <a href="performance-evaluation.html" class="card" style="text-decoration:none;color:inherit;">
+        <h3>Performance Evaluation <span class="badge badge-green">New</span></h3>
+        <p style="color:var(--text-secondary);">
+          Measured seal/open throughput (253 MB/s at 1 MB), per-layer watermark embedding overhead,
+          extraction and L3 verification scaling, content fingerprint cost (3.35 s/MB via winnowing),
+          file size overhead from zero-width expansion (5.2x), sub-100us ECC timing, and qualitative
+          comparison with C2PA and Digimarc. All data from N=10 runs on Intel Core i7.
+        </p>
+      </a>
+
+    </div>
+  </div>
+</main>
+
+<footer class="site-footer">
+  <div class="container">
+    <p>Oversight Protocol &copy; 2026 Zion Boggan. Apache 2.0 License.</p>
+    <p style="color:var(--text-muted);font-size:13px;">Co-authored with Claude Opus 4.6 and 4.7 (Anthropic).</p>
+    <p><a href="https://github.com/oversight-protocol/oversight">GitHub</a></p>
+  </div>
+</footer>
+
+<script src="../js/nav.js" defer></script>
+</body>
+</html>

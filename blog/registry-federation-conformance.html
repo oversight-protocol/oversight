@@ -1,0 +1,268 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>v0.4.7: Registry Federation Conformance Is a Test, Not a Document | Oversight Protocol</title>
+  <meta name="description" content="Federation stops being aspirational when a second operator can prove compatibility. Oversight v0.4.7 hardens the registry v1 interop spec against the reference implementation and ships a 32-check conformance harness any operator can point at their deployment.">
+  <meta name="author" content="Zion Boggan">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="../css/style.css">
+</head>
+<body>
+
+<nav class="site-nav">
+  <div class="nav-inner">
+    <a href="../" class="nav-brand"><span>Oversight</span> Protocol</a>
+    <ul class="nav-links">
+      <li><a href="../">Home</a></li>
+      <li><a href="../demo/">Demo</a></li>
+      <li><a href="../viewer/">Inspect</a></li>
+      <li><a href="../docs/">Docs</a></li>
+      <li><a href="../research/">Research</a></li>
+      <li><a href="../blog/" class="active">Blog</a></li>
+      <li><a href="../about.html">About</a></li>
+    </ul>
+  </div>
+</nav>
+
+<main>
+  <div class="container">
+
+    <div class="blog-post-header">
+      <h1>v0.4.7: Registry Federation Conformance Is a Test, Not a Document</h1>
+      <div class="blog-post-meta">2026-04-22 &middot; Zion Boggan &middot; ~6 min read</div>
+    </div>
+
+    <div class="blog-content">
+
+      <p>
+        Federation is the part of an open protocol that has to be earned. A spec on
+        GitHub is a claim. A second operator running compatible software against the
+        reference clients is a fact. Until v0.4.7, Oversight had a registry
+        federation document with the right vocabulary in it (canonicalization,
+        sidecar binding, transparency proofs) but no machinery that let anybody
+        verify the document and the reference implementation were saying the same
+        thing. v0.4.7 closes that gap. The interop spec at
+        <a href="https://github.com/oversight-protocol/oversight/blob/main/docs/spec/registry-v1.md"><code>docs/spec/registry-v1.md</code></a>
+        is now hardened against the reference server, and a 32-check conformance
+        harness at <code>tests/test_registry_conformance.py</code> runs the same
+        checks against any operator URL.
+      </p>
+
+      <p>
+        I want to write down what changed about the spec, what the harness actually
+        proves, and what it does not.
+      </p>
+
+      <h2>The spec went from a vocabulary to a contract</h2>
+
+      <p>
+        The old draft listed the endpoints and gestured at canonicalization. The new
+        version pins them. Every endpoint has a normative request shape, response
+        shape, and error contract. The endpoint table now includes the things a
+        federated verifier actually depends on and the original draft glossed over.
+        <code>/.well-known/oversight-registry</code> declares the registry's identity,
+        suite support, and transparency-log type. The beacon paths are normative,
+        not advisory: <code>/p/{token_id}.png</code> for image beacons,
+        <code>/r/{token_id}</code> for redirects, <code>/v/{token_id}</code> for
+        VRF-style probes. The <code>/evidence/{file_id}</code> bundle has a fixed
+        field set so a verifier can fetch the manifest, the issuer-signed sidecars,
+        the transparency-log inclusion proof, and the registration receipts in one
+        round trip and check them locally without trusting the operator. The
+        <code>/tlog/head</code>, <code>/tlog/proof</code>, and <code>/tlog/range</code>
+        endpoints are explicit so a verifier can pull tree heads and consistency
+        proofs without operator-specific knowledge.
+      </p>
+
+      <p>
+        One endpoint left the spec. The previous draft had a
+        <code>/query/{file_id}</code> route that nothing in the reference server
+        ever served. I deleted it. A spec that names endpoints the reference does
+        not implement is worse than a spec that omits them, because an independent
+        operator who reads the doc and implements faithfully will fail
+        interoperability for following the spec. Removing it now is cheaper than
+        removing it after a second implementation existed.
+      </p>
+
+      <h2>Canonicalization is a deliberate decision</h2>
+
+      <p>
+        Two registries agreeing on what a manifest is requires byte-level agreement
+        on JSON serialization. JSON has no canonical form by default. The spec now
+        names the exact serializer the reference server uses:
+        <code>json.dumps(sort_keys=True, separators=(",", ":"))</code> over UTF-8.
+        Sorted keys, no whitespace, ASCII or escaped Unicode. That choice is
+        compatible with most language standard libraries and avoids the rabbit hole
+        of full RFC 8785 JCS, which is more rigorous and more expensive to implement
+        correctly. The tradeoff is honest in the spec: this canonicalization works
+        for the manifest fields Oversight signs, and a second operator who implements
+        the same routine will produce the same bytes. If a future requirement forces
+        full JCS, that is a v1.x decision with a migration path.
+      </p>
+
+      <p>
+        Sidecar binding follows from canonicalization. Every registration ships a
+        signed manifest plus optional <code>beacons</code> and <code>watermarks</code>
+        sidecar arrays. The registry compares the canonical bytes of the submitted
+        sidecars against the canonical bytes of the corresponding fields inside the
+        signed manifest and rejects anything that does not match. That is what makes
+        the registry useless as an attack surface for forging beacon ownership: the
+        sidecar is only ever a search-friendly mirror of what the issuer already
+        signed, and a divergent sidecar is rejected before it touches the database.
+      </p>
+
+      <h2>One error envelope so callers can branch on a code</h2>
+
+      <p>
+        The reference server used to return errors in three or four different shapes
+        depending on which framework primitive raised them. v0.4.7 picks one shape.
+        Every error is an object with <code>error</code> (a stable string code),
+        <code>message</code> (human-readable, not machine-parseable), and an
+        optional <code>details</code> object for structured context. The code
+        vocabulary is closed: <code>bad_request</code>, <code>unauthorized</code>,
+        <code>forbidden</code>, <code>not_found</code>, <code>conflict</code>,
+        <code>unprocessable</code>, <code>rate_limited</code>,
+        <code>internal_error</code>. A federated client can branch on
+        <code>error</code> without parsing prose, and a second operator who returns
+        the same code for the same condition is wire-compatible without further
+        coordination.
+      </p>
+
+      <h2>The harness is in-process by default and live by environment variable</h2>
+
+      <p>
+        The conformance harness runs in two modes. Without
+        <code>OVERSIGHT_REGISTRY_URL</code> set, it stands the reference Python
+        registry up inside a FastAPI <code>TestClient</code> against a fresh SQLite
+        database in a temp directory, runs every check there, and tears the server
+        down. That path is the CI gate: every commit that touches the registry runs
+        the same conformance suite that an external operator would run, which means
+        the spec and the reference cannot drift without breaking the build.
+      </p>
+
+      <p>
+        With <code>OVERSIGHT_REGISTRY_URL=https://registry.example.org</code>, the
+        harness points an <code>httpx.Client</code> at that URL and runs the same
+        32 checks against the live deployment. An independent operator who passes
+        the harness is not claiming compatibility, they are demonstrating it, and
+        the run log is a compact conformance report any verifier can read.
+      </p>
+
+      <h2>What the 32 checks actually exercise</h2>
+
+      <p>
+        The checks cluster into seven groups. The first is identity and liveness:
+        the <code>/healthz</code> endpoint, the <code>/.well-known</code> document
+        with its declared suites and transparency-log type, and a HEAD probe that
+        proves the server speaks JSON over HTTPS at the URL the manifest declared.
+        The second is registration: a full sealed-manifest round trip that posts a
+        signed registration with sidecars, gets an evidence pointer back, and
+        confirms the registry stored what was signed. The third is signed-input
+        rejection: the harness deliberately ships an unsigned manifest and a
+        sidecar that does not match the manifest, and the registry must reject
+        both with the spec's <code>unauthorized</code> and <code>conflict</code>
+        codes respectively. The fourth is attribution: a token id from the
+        registration round-trips through <code>/attribute</code> and resolves to
+        the same recipient and file id, and a token id that does not exist
+        returns <code>not_found</code> rather than a generic 500.
+      </p>
+
+      <p>
+        The fifth group is evidence and transparency: <code>/evidence/{file_id}</code>
+        returns the bundle with the manifest, sidecars, signed registration receipt,
+        and inclusion proof, and the proof verifies against the tree head at
+        <code>/tlog/head</code>. The sixth is the beacon surface: each declared
+        beacon endpoint resolves with the spec-mandated content type and HTTP
+        verb, including the image beacon's PNG response and the redirect beacon's
+        302. The seventh is operational discipline: the DNS event endpoint
+        rejects callbacks without the shared <code>OVERSIGHT_DNS_EVENT_SECRET</code>
+        and accepts 503 as a valid fail-closed signal, the read-only endpoints
+        return CORS headers so the in-browser inspector can read them, and rate
+        limit and identifier-length limits on the spec edges return the expected
+        error codes.
+      </p>
+
+      <h2>What the harness does not prove</h2>
+
+      <p>
+        Two things. First, conformance is wire-format and contract conformance,
+        not security conformance. A registry that returns the right JSON shape
+        for every check can still be running broken signature verification on
+        the inside. The harness covers what a federated client observes from
+        outside; an operator running the conformance suite still owes their
+        users the threat model the protocol asks for, and the public threat
+        model at <a href="../research/threat-model.html">research/threat-model.html</a>
+        is unchanged.
+      </p>
+
+      <p>
+        Second, conformance is a snapshot. The harness pins the v1 surface in the
+        repository at the moment of release. Operators who fork the spec without
+        re-running the harness against a current reference can drift. The
+        intended cadence is: harness ships in the same commit as any normative
+        spec change, and a deployment claiming v1.x conformance is claiming the
+        harness from that release passed against it.
+      </p>
+
+      <h2>Why this is the acceptance gate for v1.0</h2>
+
+      <p>
+        Federation is on the v1.0 roadmap because Oversight's value collapses if
+        the only registry is mine. A protocol that requires a single hostname is a
+        product, not infrastructure. The conformance harness is the gate I wanted
+        before any second operator was on the line: a way to say "compatible with"
+        without ambiguity, with a reproducible artifact behind the claim. Until
+        v0.4.7, the answer to "is this implementation compatible" was "read the
+        doc and ask Zion." After v0.4.7, the answer is "run the harness." The
+        difference is the difference between a project and a protocol.
+      </p>
+
+      <p>
+        Run it against the reference:
+      </p>
+
+      <pre><code>git clone https://github.com/oversight-protocol/oversight
+cd oversight
+pip install ".[registry]"
+python3 tests/test_registry_conformance.py</code></pre>
+
+      <p>
+        Or against a live operator URL:
+      </p>
+
+      <pre><code>OVERSIGHT_REGISTRY_URL=https://registry.example.org \
+    python3 tests/test_registry_conformance.py</code></pre>
+
+      <p>
+        v1.0 stays gated on this passing in both modes, against more than one
+        registry, with the wire format declared stable. v0.4.7 is the work that
+        makes that gate concrete.
+      </p>
+
+      <p>
+        Oversight is at
+        <a href="https://github.com/oversight-protocol/oversight">github.com/oversight-protocol/oversight</a>.
+        The federation spec is at
+        <a href="https://github.com/oversight-protocol/oversight/blob/main/docs/spec/registry-v1.md"><code>docs/spec/registry-v1.md</code></a>.
+        Issues and pull requests welcome from anyone who plans to stand up a
+        compatible registry.
+      </p>
+
+    </div>
+  </div>
+</main>
+
+<footer class="site-footer">
+  <div class="container">
+    <p>Oversight Protocol &copy; 2026 Zion Boggan. Apache 2.0 License.</p>
+    <p style="color:var(--text-muted);font-size:13px;">Co-authored with Claude Opus 4.6 and 4.7 (Anthropic).</p>
+    <p><a href="https://github.com/oversight-protocol/oversight">GitHub</a></p>
+  </div>
+</footer>
+
+<script src="../js/nav.js" defer></script>
+</body>
+</html>
