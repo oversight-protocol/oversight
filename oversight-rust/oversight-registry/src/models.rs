@@ -151,3 +151,11 @@ pub struct EventRow {
     pub qualified_timestamp: Option<String>,
     pub tlog_index: Option<i64>,
 }
+
+#[derive(Debug, Clone, Serialize, Deserialize, sqlx::FromRow)]
+pub struct SemanticCandidateRow {
+    pub mark_id: String,
+    pub file_id: String,
+    pub recipient_id: String,
+    pub registered_at: i64,
+}

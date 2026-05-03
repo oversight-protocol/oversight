@@ -16,6 +16,9 @@ pub enum RegistryError {
     #[error("conflict: {0}")]
     Conflict(String),
 
+    #[error("unauthorized: {0}")]
+    Unauthorized(String),
+
     #[error("rate limit exceeded")]
     RateLimited,
 
@@ -32,16 +35,14 @@ impl IntoResponse for RegistryError {
             RegistryError::BadRequest(msg) => (StatusCode::BAD_REQUEST, msg.clone()),
             RegistryError::NotFound(msg) => (StatusCode::NOT_FOUND, msg.clone()),
             RegistryError::Conflict(msg) => (StatusCode::CONFLICT, msg.clone()),
+            RegistryError::Unauthorized(msg) => (StatusCode::UNAUTHORIZED, msg.clone()),
             RegistryError::RateLimited => {
                 (StatusCode::TOO_MANY_REQUESTS, "rate limit exceeded".into())
             }
-            RegistryError::Database(_) => (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                "database error".into(),
-            ),
-            RegistryError::Internal(msg) => {
-                (StatusCode::INTERNAL_SERVER_ERROR, msg.clone())
+            RegistryError::Database(_) => {
+                (StatusCode::INTERNAL_SERVER_ERROR, "database error".into())
             }
+            RegistryError::Internal(msg) => (StatusCode::INTERNAL_SERVER_ERROR, msg.clone()),
         };
 
         // Log server-side errors at error level; client errors at debug.

@@ -1,5 +1,20 @@
 # Oversight CHANGELOG
 
+## Unreleased
+
+- `oversight-rust/oversight-registry`: added the missing registry v1
+  read-only and beacon surface (`/.well-known/oversight-registry`,
+  `/evidence/{file_id}`, `/tlog/head|proof|range`, `/p/{token_id}.png`,
+  `/r/{token_id}`, `/v/{token_id}`, `/candidates/semantic`) and tightened
+  CORS to the public browser-inspector origins with GET/OPTIONS only. The
+  Axum server now passes the existing 33-check
+  `tests/test_registry_conformance.py` harness in live-URL mode.
+- `oversight-rust/oversight-manifest`: added `canonical_content_hash` and
+  `l3_policy` to the signed manifest model so Rust verifies Python-signed
+  v0.4.5+ manifests without dropping signed fields before canonicalization,
+  while retaining a fallback verification path for older manifests that lack
+  those default fields.
+
 ## v0.4.8 - 2026-04-29 Mobile-build portability and rustls-webpki security bump
 
 Patch release covering two upstream-driven fixes that landed on `main`
