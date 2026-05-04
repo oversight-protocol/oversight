@@ -1,0 +1,241 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Development Log: Rust Registry v1, Hybrid Viewer Samples, and Watermark Round Trips | Oversight Protocol</title>
+  <meta name="description" content="Three stacked Oversight changes move the Rust path forward: the Axum registry passes the v1 conformance harness, the browser inspector gets public hybrid decrypt sample tooling, and Rust format watermark round trips are green.">
+  <meta name="author" content="Zion Boggan">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="../css/style.css">
+</head>
+<body>
+
+<nav class="site-nav">
+  <div class="nav-inner">
+    <a href="../" class="nav-brand"><span>Oversight</span> Protocol</a>
+    <ul class="nav-links">
+      <li><a href="../">Home</a></li>
+      <li><a href="../demo/">Demo</a></li>
+      <li><a href="../viewer/">Inspect</a></li>
+      <li><a href="../docs/">Docs</a></li>
+      <li><a href="../research/">Research</a></li>
+      <li><a href="../blog/" class="active">Blog</a></li>
+      <li><a href="../about.html">About</a></li>
+    </ul>
+  </div>
+</nav>
+
+<main>
+  <div class="container">
+
+    <div class="blog-post-header">
+      <h1>Development Log: Rust Registry v1, Hybrid Viewer Samples, and Watermark Round Trips</h1>
+      <div class="blog-post-meta">2026-05-04 &middot; Zion Boggan &middot; ~7 min read</div>
+    </div>
+
+    <div class="blog-content">
+
+      <p>
+        This is a development log, not a release announcement. The work is sitting
+        in three stacked pull requests, and I want the public record to say exactly
+        what moved forward before it gets flattened into a changelog line. The
+        short version is that the Rust implementation is now much closer to being
+        a credible protocol path instead of a parallel experiment: the Rust Axum
+        registry passes the existing v1 conformance harness, the browser inspector
+        has public hybrid-decrypt sample tooling, and the Rust workspace tests are
+        green after fixing two format watermark regressions.
+      </p>
+
+      <p>
+        The three PRs are deliberately stacked. The registry compatibility work is
+        first, the hybrid viewer docs and sample tooling sit on top of that, and
+        the watermark round-trip fixes sit on top of both. That shape keeps each
+        reviewable piece narrow while still telling the real story: registry
+        interoperability, browser inspection, and watermark correctness all have
+        to line up before Oversight can claim a Rust-first verification path with
+        a straight face.
+      </p>
+
+      <h2>The Rust registry now speaks the v1 read surface</h2>
+
+      <p>
+        The biggest change is in
+        <a href="https://github.com/oversight-protocol/oversight/pull/5">PR #5</a>:
+        the Rust registry now implements the missing read-only and beacon-facing
+        pieces of the registry v1 surface. The Axum server exposes
+        <code>/.well-known/oversight-registry</code>, signed evidence bundles,
+        transparency-log head/proof/range reads, beacon callback endpoints, and
+        semantic candidate listing. The browser-facing CORS policy is constrained
+        to the public viewer/site origins and to <code>GET</code>/<code>OPTIONS</code>,
+        which is the right shape for an inspector that needs to read evidence
+        without turning registry mutation routes into browser APIs.
+      </p>
+
+      <p>
+        The interop bug in this layer was canonicalization. Python-signed
+        manifests already carry fields such as <code>canonical_content_hash</code>
+        and <code>l3_policy</code>. The Rust manifest model did not include those
+        fields, so a Rust verifier could deserialize a Python manifest, drop
+        signed fields, re-canonicalize a different object, and then reject the
+        signature. That is exactly the kind of cross-language bug a protocol
+        implementation has to catch early. The Rust manifest model now carries
+        those fields, and it keeps a legacy fallback path for older manifests that
+        predate them.
+      </p>
+
+      <p>
+        The concrete validation result is the important part: a live Rust registry
+        server passed the existing registry v1 conformance harness with 33 checks
+        passing and 0 failing. The harness is still the acceptance gate. A spec is
+        useful, but a spec plus a test that another implementation can run is the
+        thing that makes federation less aspirational.
+      </p>
+
+      <h2>The browser inspector has public hybrid samples</h2>
+
+      <p>
+        The next layer is
+        <a href="https://github.com/oversight-protocol/oversight/pull/6">PR #6</a>.
+        The browser inspector already matters because it gives recipients a way
+        to inspect sealed artifacts without installing the full sender toolchain.
+        The follow-up work documents that the viewer can decrypt both
+        <code>OSGT-CLASSIC-v1</code> and <code>OSGT-HYBRID-v1</code>, and it adds
+        public tooling to make that claim reproducible.
+      </p>
+
+      <p>
+        The sample generator, <code>tools/gen_hybrid_sample.py</code>, creates a
+        tutorial hybrid <code>.sealed</code> file and a public demo identity using
+        the same hybrid DEK-wrap construction as the production path. The Node
+        smoke harness, <code>tools/test_hybrid_decrypt_node.mjs</code>, exercises
+        the viewer decrypt path outside the browser and takes explicit
+        <code>--viewer-dir</code>, <code>--sealed</code>, and <code>--identity</code>
+        arguments. That matters because public docs should not depend on my local
+        filesystem layout. A tutorial sample needs to be generated and tested by
+        someone else on a clean checkout, not by accidentally reading a file that
+        only exists on my machine.
+      </p>
+
+      <p>
+        This is also where the project discipline shows up. The public tooling was
+        scrubbed before push so it does not carry local path assumptions or
+        internal host references. That is a small detail in the diff and a big
+        detail in practice. A public protocol repo should be boring to clone:
+        public inputs, public examples, public failures.
+      </p>
+
+      <h2>The Rust workspace went green</h2>
+
+      <p>
+        After the registry PR, the broader Rust workspace still had failures in
+        <code>oversight-formats</code>. That follow-up became
+        <a href="https://github.com/oversight-protocol/oversight/pull/7">PR #7</a>.
+        Two issues were hiding there, one in text watermark composition and one
+        in image LSB scheduling.
+      </p>
+
+      <p>
+        The text issue was layer ordering. L2 encodes bits in trailing whitespace
+        at the physical end of each line. L1 inserts zero-width frames into the
+        text stream. If L2 runs before L1, later frame insertion can move those
+        trailing spaces away from the physical line endings, and extraction no
+        longer sees the L2 pattern where it expects it. The fix is simple but
+        important: semantic L3 substitution runs first, L1 zero-width insertion
+        runs second, and L2 trailing whitespace runs last. The invariant is now
+        clear: L2 is the last text operation because it is a line-ending signal.
+      </p>
+
+      <p>
+        The image issue was a deterministic collision. Blind LSB embedding chooses
+        pseudo-random pixel positions from the mark ID and image dimensions. The
+        previous scheduler could choose the same pixel more than once, which meant
+        a later payload bit could overwrite an earlier payload bit. The fix is to
+        treat the schedule as a unique set of pixel coordinates. The luma-editing
+        helper also now verifies the final rounded Y-channel parity after small
+        RGB adjustments instead of assuming a single channel increment flipped the
+        bit. That makes the test about the actual encoded signal, not about the
+        helper's intent.
+      </p>
+
+      <p>
+        The validation command that matters here is:
+      </p>
+
+      <pre><code>cargo test --workspace --manifest-path oversight-rust/Cargo.toml</code></pre>
+
+      <p>
+        That command now passes across the Rust workspace, including the
+        <code>oversight-formats</code> unit tests and doctests. It is not glamorous
+        work, but it is the kind that prevents a protocol implementation from
+        accumulating "known failing" tests in the corners.
+      </p>
+
+      <h2>Why these changes belong together</h2>
+
+      <p>
+        Registry conformance says the Rust operator can speak the public protocol.
+        Hybrid viewer samples say a recipient can inspect modern sealed artifacts
+        with public, reproducible fixtures. Watermark round-trip fixes say the Rust
+        format layer still does what the protocol claims when the layers are
+        composed. Those are three different surfaces, but they share one standard:
+        the implementation should be testable from the outside, and the tests
+        should describe behavior a real integrator depends on.
+      </p>
+
+      <p>
+        This also tightens the Python-to-Rust migration path. I am not interested
+        in replacing a working Python reference with a Rust rewrite just because
+        Rust is fashionable. The Rust path earns its place when it does something
+        measurable: pass the same conformance harness, verify the same signed
+        manifests, serve the same evidence bundles, and keep the same watermark
+        semantics under test. These PRs move in that direction.
+      </p>
+
+      <h2>What this is not</h2>
+
+      <p>
+        This is not a v1.0 declaration. It is not a production migration plan for
+        registry operators. It does not say the wire format is frozen forever. The
+        remaining work is still real: migration tooling from the Python registry,
+        longer-running deployment tests, more operator-path hardening, and a
+        wire-format stability declaration that is boring enough to trust. The
+        right claim today is narrower: the Rust registry now passes the v1 harness,
+        the browser inspector has public hybrid sample tooling, and the Rust
+        workspace is back to green.
+      </p>
+
+      <p>
+        The PR stack is public:
+      </p>
+
+      <ul>
+        <li><a href="https://github.com/oversight-protocol/oversight/pull/5">PR #5: Rust registry v1 compatibility</a></li>
+        <li><a href="https://github.com/oversight-protocol/oversight/pull/6">PR #6: Hybrid viewer docs and sample tooling</a></li>
+        <li><a href="https://github.com/oversight-protocol/oversight/pull/7">PR #7: Rust format watermark round trips</a></li>
+      </ul>
+
+      <p>
+        That is enough progress to write down, and not enough to overstate. Good
+        protocol work usually looks like this: fewer assumptions, more fixtures,
+        more tests, and a smaller gap between the document and the thing a verifier
+        can actually run.
+      </p>
+
+    </div>
+  </div>
+</main>
+
+<footer class="site-footer">
+  <div class="container">
+    <p>Oversight Protocol &copy; 2026 Zion Boggan. Apache 2.0 License.</p>
+    <p style="color:var(--text-muted);font-size:13px;">Co-authored with Codex (OpenAI).</p>
+    <p><a href="https://github.com/oversight-protocol/oversight">GitHub</a></p>
+  </div>
+</footer>
+
+<script src="../js/nav.js" defer></script>
+</body>
+</html>

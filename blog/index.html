@@ -39,6 +39,12 @@
     <ul class="blog-list">
 
       <li class="blog-entry">
+        <div class="blog-date">2026-05-04</div>
+        <h2><a href="rust-registry-hybrid-watermark-progress.html">Development Log: Rust Registry v1, Hybrid Viewer Samples, and Watermark Round Trips</a></h2>
+        <p class="excerpt">Three stacked Oversight changes move the Rust path forward: the Axum registry now passes the v1 conformance harness, the browser inspector has public hybrid decrypt sample tooling, and Rust format watermark round trips are green after fixes to text layer ordering and image LSB scheduling. What changed, why it matters, and what still is not a v1.0 declaration.</p>
+      </li>
+
+      <li class="blog-entry">
         <div class="blog-date">2026-04-29</div>
         <h2><a href="one-verification-core.html">One Verification Core: How the Desktop and Mobile Share Rust</a></h2>
         <p class="excerpt">Two paired pushes today. Oversight v0.4.8's new <code>docs/EMBEDDING.md</code> documents the integration contract for downstream consumers: seven verifier-safe crates, four crates intentionally out of scope, the git-plus-tag pin pattern, and the minimum versions per target. Oversight-mobile v0.1.12 switches the Flutter app's Rust deps from sibling-directory path deps to a tag pin against v0.4.8, so a fresh clone of either repo now builds without sibling-checkout choreography. Why path deps were the right call for development and the wrong call for shipping, and what this unblocks for reproducible mobile builds.</p>
