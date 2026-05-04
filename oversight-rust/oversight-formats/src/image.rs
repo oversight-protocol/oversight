@@ -53,6 +53,7 @@
 use crate::{FormatAdapter, FormatError, WatermarkCandidate};
 use image::{DynamicImage, GenericImageView, ImageFormat, Pixel};
 use sha2::{Digest, Sha256};
+use std::collections::HashSet;
 use std::io::Cursor;
 
 /// Default mark_id length in bytes for extraction.
@@ -163,16 +164,36 @@ fn set_y_lsb(r: u8, g: u8, b: u8, target_bit: u8) -> (u8, u8, u8) {
     if (y & 1) == target_bit {
         return (r, g, b); // Already correct
     }
-    // Need to flip the Y LSB. Adjust green by +1 or -1.
-    let new_g = if g < 255 { g + 1 } else { g - 1 };
-    // Verify the flip happened; if not (edge case), try adjusting red.
-    let new_y = rgb_to_y(r, new_g, b);
-    if (new_y & 1) == target_bit {
-        return (r, new_g, b);
+
+    let deltas = [0i16, -1, 1];
+    let mut best: Option<(u16, u8, u8, u8)> = None;
+    for dg in deltas {
+        for dr in deltas {
+            for db in deltas {
+                let nr = r as i16 + dr;
+                let ng = g as i16 + dg;
+                let nb = b as i16 + db;
+                if !(0..=255).contains(&nr) || !(0..=255).contains(&ng) || !(0..=255).contains(&nb)
+                {
+                    continue;
+                }
+                let nr = nr as u8;
+                let ng = ng as u8;
+                let nb = nb as u8;
+                if (rgb_to_y(nr, ng, nb) & 1) != target_bit {
+                    continue;
+                }
+                let cost = dr.unsigned_abs() + dg.unsigned_abs() + db.unsigned_abs();
+                match best {
+                    Some((best_cost, _, _, _)) if best_cost <= cost => {}
+                    _ => best = Some((cost, nr, ng, nb)),
+                }
+            }
+        }
     }
-    // Fallback: adjust red
-    let new_r = if r < 255 { r + 1 } else { r - 1 };
-    (new_r, g, b)
+
+    best.map(|(_, nr, ng, nb)| (nr, ng, nb))
+        .unwrap_or((r, g, b))
 }
 
 // ---------------------------------------------------------------------------
@@ -187,6 +208,7 @@ fn set_y_lsb(r: u8, g: u8, b: u8, target_bit: u8) -> (u8, u8, u8) {
 fn pixel_positions(mark_id: &[u8], width: u32, height: u32, count: usize) -> Vec<(u32, u32)> {
     let total_pixels = (width as u64) * (height as u64);
     let mut positions = Vec::with_capacity(count);
+    let mut seen = HashSet::with_capacity(count);
     let mut counter: u64 = 0;
 
     while positions.len() < count {
@@ -205,7 +227,9 @@ fn pixel_positions(mark_id: &[u8], width: u32, height: u32, count: usize) -> Vec
             let idx = val % total_pixels;
             let x = (idx % width as u64) as u32;
             let y = (idx / width as u64) as u32;
-            positions.push((x, y));
+            if seen.insert((x, y)) {
+                positions.push((x, y));
+            }
         }
         counter += 1;
     }
@@ -239,7 +263,9 @@ pub fn embed_lsb(image_bytes: &[u8], mark_id: &[u8]) -> Result<Vec<u8>, FormatEr
     if total_bits as u64 > total_pixels {
         return Err(FormatError::EmbedFailed(format!(
             "image too small: need {} pixels for {} payload bits, have {}",
-            total_bits, payload.len(), total_pixels
+            total_bits,
+            payload.len(),
+            total_pixels
         )));
     }
 
@@ -340,7 +366,9 @@ pub fn embed_lsb_blind(image_bytes: &[u8], mark_id: &[u8]) -> Result<Vec<u8>, Fo
     if total_bits as u64 > total_pixels {
         return Err(FormatError::EmbedFailed(format!(
             "image too small: need {} pixels for {} payload bits, have {}",
-            total_bits, payload.len(), total_pixels
+            total_bits,
+            payload.len(),
+            total_pixels
         )));
     }
 
@@ -459,9 +487,7 @@ mod tests {
     #[test]
     fn blind_embed_extract_round_trip() {
         // Create a small test image (32x32 white)
-        let img = image::RgbaImage::from_fn(32, 32, |_x, _y| {
-            image::Rgba([200, 200, 200, 255])
-        });
+        let img = image::RgbaImage::from_fn(32, 32, |_x, _y| image::Rgba([200, 200, 200, 255]));
         let mut buf = Cursor::new(Vec::new());
         img.write_to(&mut buf, ImageFormat::Png).unwrap();
         let png_bytes = buf.into_inner();
@@ -492,7 +518,10 @@ mod tests {
         let extracted = extract_lsb(&png_bytes, 8).unwrap();
         // Very likely None since random pixels won't have our magic header
         // (probability of false positive: 2^-16 per attempt)
-        assert!(extracted.is_none(), "unmarked image should not yield a watermark");
+        assert!(
+            extracted.is_none(),
+            "unmarked image should not yield a watermark"
+        );
     }
 
     #[test]

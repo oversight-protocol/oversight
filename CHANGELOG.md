@@ -32,6 +32,11 @@
   v0.4.5+ manifests without dropping signed fields before canonicalization,
   while retaining a fallback verification path for older manifests that lack
   those default fields.
+- `oversight-rust/oversight-formats`: fixed Rust text/image watermark
+  regressions that were failing the workspace test suite. Text embedding now
+  keeps L2 trailing-whitespace marks at physical line endings after L1
+  zero-width insertion, and image LSB embedding avoids duplicate pixel slots
+  that could overwrite earlier payload bits.
 
 ## v0.4.8 - 2026-04-29 Mobile-build portability and rustls-webpki security bump
 
