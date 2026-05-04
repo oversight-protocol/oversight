@@ -6,9 +6,10 @@
 //! - **L2** trailing whitespace (`oversight-watermark::embed_ws` / `extract_ws`)
 //! - **L3** semantic synonym rotation (`oversight-semantic::embed_synonyms` / `verify_synonyms`)
 //!
-//! Layer order on embed: L3 runs first (rewrites visible words), then L2
-//! (trailing whitespace), then L1 (zero-width chars). This matches the
-//! Python `oversight_core.formats.text` adapter.
+//! Layer order on embed: L3 runs first (rewrites visible words), then L1
+//! (zero-width chars), then L2 (trailing whitespace). L2 runs last so later
+//! zero-width frame insertion cannot move trailing whitespace away from the
+//! physical end of a line.
 
 use crate::{FormatAdapter, FormatError, WatermarkCandidate};
 
@@ -33,7 +34,9 @@ impl FormatAdapter for TextAdapter {
     }
 
     fn extensions(&self) -> &[&str] {
-        &["txt", "md", "rst", "csv", "log", "json", "xml", "yaml", "yml", "toml"]
+        &[
+            "txt", "md", "rst", "csv", "log", "json", "xml", "yaml", "yml", "toml",
+        ]
     }
 
     fn can_handle(&self, data: &[u8]) -> bool {
@@ -81,16 +84,17 @@ impl FormatAdapter for TextAdapter {
 
 /// Apply all three watermark layers to plaintext.
 ///
-/// Layer order: L3 first (rewrites visible words), then L2 (trailing
-/// whitespace), then L1 (zero-width chars). This order ensures that
-/// steganographic layers don't get clobbered by semantic rewriting.
+/// Layer order: L3 first (rewrites visible words), then L1 (zero-width
+/// chars), then L2 (trailing whitespace). This order ensures that semantic
+/// rewriting does not fragment invisible frames and that L2 remains at line
+/// endings.
 pub fn embed_all_layers(text: &str, mark_id: &[u8]) -> String {
     // L3: semantic synonym rotation
     let t = oversight_semantic::embed_synonyms(text, mark_id, L3_MIN_INSTANCES);
-    // L2: trailing whitespace
-    let t = oversight_watermark::embed_ws(&t, mark_id);
     // L1: zero-width unicode
-    oversight_watermark::embed_zw(&t, mark_id, ZW_DENSITY)
+    let t = oversight_watermark::embed_zw(&t, mark_id, ZW_DENSITY);
+    // L2: trailing whitespace
+    oversight_watermark::embed_ws(&t, mark_id)
 }
 
 /// Apply only specific layers. `layers` is a slice of layer names: "L1", "L2", "L3".
@@ -99,11 +103,11 @@ pub fn embed_layers(text: &str, mark_id: &[u8], layers: &[&str]) -> String {
     if layers.contains(&"L3") {
         t = oversight_semantic::embed_synonyms(&t, mark_id, L3_MIN_INSTANCES);
     }
-    if layers.contains(&"L2") {
-        t = oversight_watermark::embed_ws(&t, mark_id);
-    }
     if layers.contains(&"L1") {
         t = oversight_watermark::embed_zw(&t, mark_id, ZW_DENSITY);
+    }
+    if layers.contains(&"L2") {
+        t = oversight_watermark::embed_ws(&t, mark_id);
     }
     t
 }
@@ -145,7 +149,8 @@ pub fn extract_all_layers(text: &str) -> Vec<WatermarkCandidate> {
 /// Returns `Some(WatermarkCandidate)` if the candidate matches with score
 /// above the threshold, `None` otherwise.
 pub fn verify_l3(text: &str, candidate_mark_id: &[u8]) -> Option<WatermarkCandidate> {
-    let (matched, score) = oversight_semantic::verify_synonyms(text, candidate_mark_id, L3_THRESHOLD);
+    let (matched, score) =
+        oversight_semantic::verify_synonyms(text, candidate_mark_id, L3_THRESHOLD);
     if matched {
         Some(WatermarkCandidate {
             mark_id: candidate_mark_id.to_vec(),
@@ -230,17 +235,16 @@ fn normalize_text(text: &str) -> String {
 mod tests {
     use super::*;
 
-    const LONG_TEXT: &str = "The quick brown fox jumps over the lazy dog. \
-        Revenue performance exceeded expectations across all business units. \
-        The team plans to continue the expansion strategy outlined in the report. \
-        However, there are important risks to consider before we commence the next \
-        phase. We need to carefully review the competitive situation and determine \
-        whether our current approach is the right one. The board will also request \
-        that we improve internal reporting and reduce operational overhead. It is \
-        difficult to know exactly how quickly the market will change, but we should \
-        respond rapidly when opportunities appear. Overall the results show clear \
-        momentum and a strong basis for continued growth. The organization has \
-        demonstrated significant progress in multiple areas this quarter.";
+    fn long_text() -> String {
+        (0..80)
+            .map(|i| {
+                format!(
+                    "Line {i}: The quick brown fox jumps over the lazy dog while revenue performance and operational plans remain under review."
+                )
+            })
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
 
     #[test]
     fn text_adapter_can_handle() {
@@ -264,7 +268,8 @@ mod tests {
     #[test]
     fn embed_extract_round_trip_l1_l2() {
         let mark = oversight_watermark::new_mark_id(MARK_LEN);
-        let marked = embed_layers(LONG_TEXT, &mark, &["L1", "L2"]);
+        let text = long_text();
+        let marked = embed_layers(&text, &mark, &["L1", "L2"]);
         let candidates = extract_all_layers(&marked);
 
         let l1_hits: Vec<_> = candidates.iter().filter(|c| c.layer == "L1").collect();
@@ -279,7 +284,8 @@ mod tests {
     #[test]
     fn embed_extract_all_layers_round_trip() {
         let mark = oversight_watermark::new_mark_id(MARK_LEN);
-        let marked = embed_all_layers(LONG_TEXT, &mark);
+        let text = long_text();
+        let marked = embed_all_layers(&text, &mark);
 
         // L1 + L2 direct extraction
         let candidates = extract_all_layers(&marked);
@@ -296,7 +302,8 @@ mod tests {
     #[test]
     fn verify_all_layers_correct_mark() {
         let mark = oversight_watermark::new_mark_id(MARK_LEN);
-        let marked = embed_all_layers(LONG_TEXT, &mark);
+        let text = long_text();
+        let marked = embed_all_layers(&text, &mark);
         let results = verify_all_layers(&marked, &mark);
         let layers: Vec<&str> = results.iter().map(|r| r.layer.as_str()).collect();
         assert!(layers.contains(&"L1"), "L1 should verify");
@@ -308,22 +315,32 @@ mod tests {
     fn verify_all_layers_wrong_mark() {
         let good = oversight_watermark::new_mark_id(MARK_LEN);
         let bad = oversight_watermark::new_mark_id(MARK_LEN);
-        let marked = embed_all_layers(LONG_TEXT, &good);
+        let text = long_text();
+        let marked = embed_all_layers(&text, &good);
         let results = verify_all_layers(&marked, &bad);
         // Wrong mark should not match any layer (with overwhelmingly high probability)
-        assert!(results.is_empty() || results.iter().all(|r| r.layer == "L3" && r.confidence < 0.80));
+        assert!(
+            results.is_empty()
+                || results
+                    .iter()
+                    .all(|r| r.layer == "L3" && r.confidence < 0.80)
+        );
     }
 
     #[test]
     fn adapter_embed_extract_via_trait() {
         let adapter = TextAdapter;
         let mark = oversight_watermark::new_mark_id(MARK_LEN);
-        let data = LONG_TEXT.as_bytes();
+        let text = long_text();
+        let data = text.as_bytes();
 
         let marked_bytes = adapter.embed_watermark(data, &mark).unwrap();
         let candidates = adapter.extract_watermark(&marked_bytes).unwrap();
 
-        assert!(!candidates.is_empty(), "should extract at least one candidate");
+        assert!(
+            !candidates.is_empty(),
+            "should extract at least one candidate"
+        );
         assert!(candidates.iter().any(|c| c.mark_id == mark));
     }
 
@@ -341,9 +358,7 @@ mod tests {
     fn normalize_collapses_whitespace() {
         let adapter = TextAdapter;
         let text = "  Hello   world  \n\n  foo  ";
-        let normalized = adapter
-            .normalize_for_fingerprint(text.as_bytes())
-            .unwrap();
+        let normalized = adapter.normalize_for_fingerprint(text.as_bytes()).unwrap();
         assert_eq!(normalized, "hello world foo");
     }
 
@@ -351,7 +366,8 @@ mod tests {
     fn l1_survives_stripped_whitespace() {
         // L1 zero-width chars survive trailing-whitespace stripping
         let mark = oversight_watermark::new_mark_id(MARK_LEN);
-        let marked = embed_all_layers(LONG_TEXT, &mark);
+        let text = long_text();
+        let marked = embed_all_layers(&text, &mark);
         let stripped: String = marked
             .lines()
             .map(|l| l.trim_end())
@@ -359,7 +375,10 @@ mod tests {
             .join("\n");
         let candidates = extract_all_layers(&stripped);
         let l1_hits: Vec<_> = candidates.iter().filter(|c| c.layer == "L1").collect();
-        assert!(!l1_hits.is_empty(), "L1 should survive whitespace stripping");
+        assert!(
+            !l1_hits.is_empty(),
+            "L1 should survive whitespace stripping"
+        );
         assert_eq!(l1_hits[0].mark_id, mark);
     }
 }
