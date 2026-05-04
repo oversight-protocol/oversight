@@ -2,6 +2,24 @@
 
 ## Unreleased
 
+- **Browser inspector: hybrid (post-quantum) decrypt shipped (2026-05-03).**
+  The viewer at `oversight-protocol.github.io/oversight/viewer/` now decrypts
+  `OSGT-HYBRID-v1` sealed files end-to-end, in addition to the
+  `OSGT-CLASSIC-v1` path that shipped earlier. Implementation reuses
+  WebCrypto X25519 + HKDF-SHA256 and the existing vendored `@noble/ciphers`
+  XChaCha20-Poly1305, plus a newly vendored `@noble/post-quantum` ML-KEM-768
+  for the post-quantum half of the KEM. KEK is bound X-wing-style over both
+  shared secrets and both ephemeral inputs (`ss_x || ss_pq || eph_pub ||
+  mlkem_ct`), matching `oversight_core.crypto.hybrid_wrap_dek`. New files
+  on the site: `viewer/vendor/noble-post-quantum-ml-kem-0.6.1.js` (+ three
+  vendored transitive deps from `@noble/hashes` and `@noble/curves`),
+  `viewer/samples/tutorial-hybrid.sealed`, and
+  `viewer/samples/tutorial-hybrid-identity.json`. New "Load hybrid tutorial
+  identity" button surfaces the test fixture. New tooling:
+  `tools/gen_hybrid_sample.py` (self-contained sample generator that mirrors
+  the production hybrid wrap construction, runs anywhere `oqs` and
+  `cryptography` are available), and `tools/test_hybrid_decrypt_node.mjs`
+  (Node-based end-to-end smoke test against Node's WebCrypto).
 - `oversight-rust/oversight-registry`: added the missing registry v1
   read-only and beacon surface (`/.well-known/oversight-registry`,
   `/evidence/{file_id}`, `/tlog/head|proof|range`, `/p/{token_id}.png`,
