@@ -24,7 +24,10 @@ pub async fn dns_event(
     if evt.token_id.is_empty() || evt.token_id.len() > MAX_ID_LEN {
         return Err(RegistryError::BadRequest("invalid token_id".into()));
     }
-    if evt.client_ip.as_deref().is_some_and(|v| v.len() > MAX_ID_LEN)
+    if evt
+        .client_ip
+        .as_deref()
+        .is_some_and(|v| v.len() > MAX_ID_LEN)
         || evt.qtype.as_deref().is_some_and(|v| v.len() > MAX_ID_LEN)
         || evt.qname.as_deref().is_some_and(|v| v.len() > MAX_ID_LEN)
     {
@@ -97,11 +100,7 @@ pub async fn dns_event(
     }))
 }
 
-fn verify_dns_event_auth(
-    state: &AppState,
-    headers: &HeaderMap,
-    addr: &SocketAddr,
-) -> Result<()> {
+fn verify_dns_event_auth(state: &AppState, headers: &HeaderMap, addr: &SocketAddr) -> Result<()> {
     if let Some(secret) = state.dns_event_secret.as_deref() {
         let supplied = headers
             .get("x-oversight-dns-secret")
@@ -110,7 +109,7 @@ fn verify_dns_event_auth(
         if constant_time_eq(supplied.as_bytes(), secret.as_bytes()) {
             return Ok(());
         }
-        return Err(RegistryError::BadRequest(
+        return Err(RegistryError::Unauthorized(
             "invalid dns event authentication".into(),
         ));
     }

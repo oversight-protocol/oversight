@@ -124,13 +124,25 @@ pub async fn register(
             .and_then(|v| v.as_str())
             .unwrap_or("unknown");
         if token_id.is_empty() || token_id.len() > MAX_ID_LEN {
-            return Err(RegistryError::BadRequest("signed beacon has invalid token_id".into()));
+            return Err(RegistryError::BadRequest(
+                "signed beacon has invalid token_id".into(),
+            ));
         }
         if kind.is_empty() || kind.len() > MAX_ID_LEN {
-            return Err(RegistryError::BadRequest("signed beacon has invalid kind".into()));
+            return Err(RegistryError::BadRequest(
+                "signed beacon has invalid kind".into(),
+            ));
         }
-        db::upsert_beacon(&state.db, token_id, file_id, recipient_id, issuer_id, kind, now)
-            .await?;
+        db::upsert_beacon(
+            &state.db,
+            token_id,
+            file_id,
+            recipient_id,
+            issuer_id,
+            kind,
+            now,
+        )
+        .await?;
     }
 
     for watermark in &signed_watermarks {
@@ -143,13 +155,25 @@ pub async fn register(
             .and_then(|v| v.as_str())
             .unwrap_or("unknown");
         if mark_id.is_empty() || mark_id.len() > MAX_ID_LEN {
-            return Err(RegistryError::BadRequest("signed watermark has invalid mark_id".into()));
+            return Err(RegistryError::BadRequest(
+                "signed watermark has invalid mark_id".into(),
+            ));
         }
         if layer.is_empty() || layer.len() > MAX_ID_LEN {
-            return Err(RegistryError::BadRequest("signed watermark has invalid layer".into()));
+            return Err(RegistryError::BadRequest(
+                "signed watermark has invalid layer".into(),
+            ));
         }
-        db::upsert_watermark(&state.db, mark_id, layer, file_id, recipient_id, issuer_id, now)
-            .await?;
+        db::upsert_watermark(
+            &state.db,
+            mark_id,
+            layer,
+            file_id,
+            recipient_id,
+            issuer_id,
+            now,
+        )
+        .await?;
     }
 
     // Corpus hashes (optional)
@@ -189,7 +213,14 @@ pub async fn register(
 
     // ---- Optional Rekor attestation ----
     let rekor_result = if state.rekor_enabled {
-        attest_to_rekor(&state, file_id, &issuer_pub, recipient_id, manifest, &signed_watermarks)
+        attest_to_rekor(
+            &state,
+            file_id,
+            &issuer_pub,
+            recipient_id,
+            manifest,
+            &signed_watermarks,
+        )
     } else {
         None
     };
@@ -244,7 +275,8 @@ fn attest_to_rekor(
 
     let Some(mark_id_hex) = signed_watermarks
         .iter()
-        .find_map(|w| w.get("mark_id").and_then(|v| v.as_str())) else {
+        .find_map(|w| w.get("mark_id").and_then(|v| v.as_str()))
+    else {
         return Some(serde_json::json!({
             "skipped": "no signed watermark mark_id to attest",
             "tlog_kind": oversight_rekor::TLOG_KIND,
@@ -254,10 +286,7 @@ fn attest_to_rekor(
     let mut wm_map = std::collections::BTreeMap::new();
     for (i, w) in signed_watermarks.iter().enumerate() {
         let fallback = format!("layer_{i}");
-        let layer = w
-            .get("layer")
-            .and_then(|v| v.as_str())
-            .unwrap_or(&fallback);
+        let layer = w.get("layer").and_then(|v| v.as_str()).unwrap_or(&fallback);
         if let Some(mid) = w.get("mark_id").and_then(|v| v.as_str()) {
             wm_map.insert(
                 layer.to_string(),

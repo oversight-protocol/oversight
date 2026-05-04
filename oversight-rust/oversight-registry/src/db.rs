@@ -14,9 +14,8 @@ use crate::models::*;
 pub async fn create_pool(db_path: &Path) -> Result<SqlitePool> {
     // Ensure parent directory exists.
     if let Some(parent) = db_path.parent() {
-        std::fs::create_dir_all(parent).map_err(|e| {
-            RegistryError::Internal(format!("cannot create db directory: {e}"))
-        })?;
+        std::fs::create_dir_all(parent)
+            .map_err(|e| RegistryError::Internal(format!("cannot create db directory: {e}")))?;
     }
 
     let db_url = format!("sqlite://{}?mode=rwc", db_path.display());
@@ -136,16 +135,12 @@ pub async fn run_migrations(pool: &SqlitePool) -> Result<()> {
 // ---- Manifest queries ---------------------------------------------------
 
 /// Look up the issuer pubkey for an existing file_id. Returns None if not found.
-pub async fn get_manifest_issuer_pub(
-    pool: &SqlitePool,
-    file_id: &str,
-) -> Result<Option<String>> {
-    let row: Option<(String,)> = sqlx::query_as(
-        "SELECT issuer_ed25519_pub FROM manifests WHERE file_id = ?",
-    )
-    .bind(file_id)
-    .fetch_optional(pool)
-    .await?;
+pub async fn get_manifest_issuer_pub(pool: &SqlitePool, file_id: &str) -> Result<Option<String>> {
+    let row: Option<(String,)> =
+        sqlx::query_as("SELECT issuer_ed25519_pub FROM manifests WHERE file_id = ?")
+            .bind(file_id)
+            .fetch_optional(pool)
+            .await?;
     Ok(row.map(|r| r.0))
 }
 
@@ -287,10 +282,7 @@ pub async fn get_watermark(
 }
 
 /// Get all watermarks for a file_id.
-pub async fn get_watermarks_by_file(
-    pool: &SqlitePool,
-    file_id: &str,
-) -> Result<Vec<WatermarkRow>> {
+pub async fn get_watermarks_by_file(pool: &SqlitePool, file_id: &str) -> Result<Vec<WatermarkRow>> {
     let rows = sqlx::query_as::<_, WatermarkRow>(
         "SELECT mark_id, layer, file_id, recipient_id, issuer_id, registered_at FROM watermarks WHERE file_id = ?",
     )
@@ -352,6 +344,17 @@ pub async fn get_recent_events(
     Ok(rows)
 }
 
+/// Get all events for a file_id, oldest first.
+pub async fn get_events_by_file(pool: &SqlitePool, file_id: &str) -> Result<Vec<EventRow>> {
+    let rows = sqlx::query_as::<_, EventRow>(
+        "SELECT id, token_id, file_id, recipient_id, issuer_id, kind, source_ip, user_agent, extra, timestamp, qualified_timestamp, tlog_index FROM events WHERE file_id = ? ORDER BY timestamp ASC",
+    )
+    .bind(file_id)
+    .fetch_all(pool)
+    .await?;
+    Ok(rows)
+}
+
 // ---- Corpus queries -----------------------------------------------------
 
 /// Insert or replace a corpus hash entry.
@@ -386,4 +389,32 @@ pub async fn lookup_by_perceptual_hash(
     .fetch_optional(pool)
     .await?;
     Ok(row)
+}
+
+/// Return recent L3 semantic watermark candidates for verifier scrapers.
+pub async fn get_semantic_candidates(
+    pool: &SqlitePool,
+    limit: i64,
+    since: Option<i64>,
+) -> Result<Vec<SemanticCandidateRow>> {
+    let rows = match since {
+        Some(since) => {
+            sqlx::query_as::<_, SemanticCandidateRow>(
+                "SELECT mark_id, file_id, recipient_id, registered_at FROM watermarks WHERE layer = 'L3_semantic' AND registered_at >= ? ORDER BY registered_at DESC LIMIT ?",
+            )
+            .bind(since)
+            .bind(limit)
+            .fetch_all(pool)
+            .await?
+        }
+        None => {
+            sqlx::query_as::<_, SemanticCandidateRow>(
+                "SELECT mark_id, file_id, recipient_id, registered_at FROM watermarks WHERE layer = 'L3_semantic' ORDER BY registered_at DESC LIMIT ?",
+            )
+            .bind(limit)
+            .fetch_all(pool)
+            .await?
+        }
+    };
+    Ok(rows)
 }

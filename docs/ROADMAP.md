@@ -26,8 +26,12 @@ threat-model honesty, not on a calendar date.
    byte-identical to Python, optional registry lookups, and full
    decryption of classic-suite sealed files using WebCrypto X25519 + HKDF-SHA256
    with a vendored `@noble/ciphers` XChaCha20-Poly1305. Post-decrypt
-   SHA-256 matches `content_hash` or the flow aborts. Hybrid (post-quantum)
-   in-browser decrypt is the follow-up milestone.
+   SHA-256 matches `content_hash` or the flow aborts. Hybrid
+   (post-quantum) in-browser decrypt **shipped 2026-05-03** using a
+   vendored ML-KEM-768 from `@noble/post-quantum` for the post-quantum
+   half of the KEM, with X-wing-style HKDF binding over both shared
+   secrets. The viewer now decrypts both `OSGT-CLASSIC-v1` and
+   `OSGT-HYBRID-v1` sealed files.
 5. **Outlook add-in first** for the first ecosystem integration. Drive,
    Box, SharePoint, and Teams plugins are deferred until a maintainer or
    design partner funds them.
@@ -39,8 +43,9 @@ threat-model honesty, not on a calendar date.
 ## Public launch sequence
 
 1. L3 safety and collusion documentation. **Shipped in v0.4.5.**
-2. Browser inspector and drag-drop share workflow. **Inspector and
-   classic-suite decrypt shipped**; hybrid decrypt pending.
+2. Browser inspector and drag-drop share workflow. **Shipped** -
+   inspector, classic-suite decrypt, and hybrid (post-quantum) decrypt
+   are all live.
 3. Outlook add-in. **Next up.**
 4. One regulated-industry design-partner deployment.
 5. SOC 2 Type 1 scoping in parallel with the design partner.
@@ -183,15 +188,6 @@ place.
 
 ## Next
 
-### Hybrid (post-quantum) decrypt in the browser
-
-Classic suite works today. Hybrid adds ML-KEM-768 decapsulation for the
-second shared secret alongside X25519. WebCrypto does not expose
-ML-KEM yet. Candidate path: a wasm build of `liboqs` for the KEM step
-with the rest of the primitives handled as they are today. Viewer
-already surfaces a stub error for hybrid inputs so the UX degrades
-gracefully until the KEM is available.
-
 ### Outlook add-in
 
 Microsoft add-in manifest, JS SDK surface, hosted manifest URL, and a
@@ -212,10 +208,11 @@ material.
 ### Registry in Rust
 
 `oversight-rust/oversight-registry` is scaffolded with all endpoints
-implemented under `#![forbid(unsafe_code)]`. Remaining work: integration
-testing, migration tooling from the Python registry, and wire-format
-stability declaration. The conformance harness is the acceptance gate
-for declaring v1.0 ready.
+implemented under `#![forbid(unsafe_code)]`. As of 2026-05-03, the Axum
+server passes the existing 33-check `tests/test_registry_conformance.py`
+harness in live-URL mode against the registry v1 surface. Remaining work:
+migration tooling from the Python registry, longer-running deployment tests,
+and a wire-format stability declaration before declaring v1.0 ready.
 
 ---
 
@@ -285,7 +282,7 @@ via VM and retype, hardware-key pull mid-open.
 | 6 | SIEM export: Splunk, Sentinel, ECS | Shipped (v0.4.6) |
 | 7 | Registry v1 spec + conformance harness + CORS | Shipped (v0.4.7) |
 | 8 | Browser inspector, classic-suite decrypt, opsec scanner + CI | Shipped |
-| 9 | Hybrid PQ decrypt in browser | Next |
+| 9 | Hybrid PQ decrypt in browser | Shipped (2026-05-03) |
 | 10 | Outlook add-in | Next |
 | 11 | Hardware KeyProvider in Rust | In progress |
 | 12 | Rust Axum registry, migration tooling | In progress |

@@ -48,6 +48,7 @@ pub struct Manifest {
     pub suite: String,
     pub original_filename: String,
     pub content_hash: String,
+    pub canonical_content_hash: String,
     pub content_type: String,
     pub size_bytes: u64,
     pub issuer_id: String,
@@ -57,6 +58,7 @@ pub struct Manifest {
     pub watermarks: Vec<WatermarkRef>,
     pub beacons: Vec<serde_json::Value>,
     pub policy: serde_json::Value,
+    pub l3_policy: serde_json::Value,
     pub signature_ed25519: String,
     pub signature_ml_dsa: String,
 }
@@ -70,6 +72,7 @@ impl Default for Manifest {
             suite: crypto::SUITE_CLASSIC_V1.into(),
             original_filename: String::new(),
             content_hash: String::new(),
+            canonical_content_hash: String::new(),
             content_type: "application/octet-stream".into(),
             size_bytes: 0,
             issuer_id: String::new(),
@@ -78,6 +81,7 @@ impl Default for Manifest {
             watermarks: Vec::new(),
             beacons: Vec::new(),
             policy: serde_json::json!({}),
+            l3_policy: serde_json::json!({}),
             signature_ed25519: String::new(),
             signature_ml_dsa: String::new(),
         }
@@ -117,6 +121,7 @@ impl Manifest {
                 .unwrap_or(0),
             original_filename: original_filename.into(),
             content_hash: content_hash.into(),
+            canonical_content_hash: String::new(),
             content_type: content_type.into(),
             size_bytes,
             issuer_id: issuer_id.into(),
@@ -125,6 +130,14 @@ impl Manifest {
             policy,
             ..Default::default()
         }
+        .with_default_canonical_content_hash()
+    }
+
+    fn with_default_canonical_content_hash(mut self) -> Self {
+        if self.canonical_content_hash.is_empty() {
+            self.canonical_content_hash = self.content_hash.clone();
+        }
+        self
     }
 
     /// Canonical bytes (excluding signatures) — this is what gets signed.
@@ -134,6 +147,21 @@ impl Manifest {
         if let Some(obj) = v.as_object_mut() {
             obj.insert("signature_ed25519".into(), serde_json::json!(""));
             obj.insert("signature_ml_dsa".into(), serde_json::json!(""));
+        }
+        serde_jcs::to_vec(&v).map_err(|_| ManifestError::Canonicalization)
+    }
+
+    fn legacy_canonical_bytes_without_new_defaults(&self) -> Result<Vec<u8>, ManifestError> {
+        let mut v = serde_json::to_value(self)?;
+        if let Some(obj) = v.as_object_mut() {
+            obj.insert("signature_ed25519".into(), serde_json::json!(""));
+            obj.insert("signature_ml_dsa".into(), serde_json::json!(""));
+            if self.canonical_content_hash.is_empty() {
+                obj.remove("canonical_content_hash");
+            }
+            if self.l3_policy.as_object().is_some_and(|o| o.is_empty()) {
+                obj.remove("l3_policy");
+            }
         }
         serde_jcs::to_vec(&v).map_err(|_| ManifestError::Canonicalization)
     }
@@ -165,7 +193,14 @@ impl Manifest {
         let bytes = self.canonical_bytes()?;
         let sig = hex::decode(&self.signature_ed25519)?;
         let pub_key = hex::decode(&self.issuer_ed25519_pub)?;
-        Ok(crypto::verify_message(&bytes, &sig, &pub_key))
+        if crypto::verify_message(&bytes, &sig, &pub_key) {
+            return Ok(true);
+        }
+        let legacy_bytes = self.legacy_canonical_bytes_without_new_defaults()?;
+        if legacy_bytes != bytes {
+            return Ok(crypto::verify_message(&legacy_bytes, &sig, &pub_key));
+        }
+        Ok(false)
     }
 }
 
@@ -231,6 +266,47 @@ mod tests {
         let bytes = m.to_json().unwrap();
         let parsed = Manifest::from_json(&bytes).unwrap();
         assert_eq!(m, parsed);
+        assert!(parsed.verify().unwrap());
+    }
+
+    #[test]
+    fn verify_legacy_manifest_missing_l3_fields() {
+        let issuer = ClassicIdentity::generate();
+        let recipient = ClassicIdentity::generate();
+        let m = Manifest::new(
+            "doc.txt",
+            crypto::content_hash(b"hello"),
+            5,
+            "issuer@test",
+            hex::encode(issuer.ed25519_pub),
+            Recipient {
+                recipient_id: "alice@test".into(),
+                x25519_pub: hex::encode(recipient.x25519_pub),
+                ed25519_pub: None,
+            },
+            "https://registry.test",
+            "text/plain",
+            None,
+            None,
+            "GLOBAL",
+        );
+
+        let mut value = serde_json::to_value(&m).unwrap();
+        {
+            let obj = value.as_object_mut().unwrap();
+            obj.remove("canonical_content_hash");
+            obj.remove("l3_policy");
+            obj.insert("signature_ed25519".into(), serde_json::json!(""));
+            obj.insert("signature_ml_dsa".into(), serde_json::json!(""));
+        }
+        let legacy_bytes = serde_jcs::to_vec(&value).unwrap();
+        let sig = crypto::sign_message(&legacy_bytes, issuer.ed25519_priv.as_ref()).unwrap();
+        value.as_object_mut().unwrap().insert(
+            "signature_ed25519".into(),
+            serde_json::json!(hex::encode(sig)),
+        );
+
+        let parsed: Manifest = serde_json::from_value(value).unwrap();
         assert!(parsed.verify().unwrap());
     }
 }

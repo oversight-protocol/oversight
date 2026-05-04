@@ -26,7 +26,7 @@ use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
 use axum::extract::{ConnectInfo, State};
-use axum::http::{HeaderMap, Request, StatusCode};
+use axum::http::{header, HeaderMap, HeaderValue, Method, Request, StatusCode};
 use axum::middleware::{self, Next};
 use axum::response::Response;
 use axum::routing::{get, post};
@@ -34,7 +34,7 @@ use axum::Router;
 use clap::Parser;
 use oversight_tlog::TransparencyLog;
 use sqlx::SqlitePool;
-use tower_http::cors::CorsLayer;
+use tower_http::cors::{AllowOrigin, CorsLayer};
 use tower_http::trace::TraceLayer;
 
 pub const VERSION: &str = "1.0.0";
@@ -250,6 +250,41 @@ fn load_or_create_identity(data_dir: &PathBuf) -> Option<RegistryIdentity> {
     })
 }
 
+fn allowed_cors_origins() -> Vec<HeaderValue> {
+    let mut origins = vec![
+        "https://oversight-protocol.github.io".to_string(),
+        "https://oversightprotocol.dev".to_string(),
+        "https://www.oversightprotocol.dev".to_string(),
+        "http://localhost:8000".to_string(),
+        "http://127.0.0.1:8000".to_string(),
+        "http://localhost:8787".to_string(),
+        "http://127.0.0.1:8787".to_string(),
+    ];
+    origins.extend(
+        std::env::var("OVERSIGHT_CORS_ORIGINS")
+            .unwrap_or_default()
+            .split(',')
+            .map(str::trim)
+            .filter(|origin| !origin.is_empty())
+            .map(str::to_string),
+    );
+    origins
+        .into_iter()
+        .filter_map(|origin| HeaderValue::from_str(&origin).ok())
+        .collect()
+}
+
+fn cors_layer() -> CorsLayer {
+    let allowed = allowed_cors_origins();
+    CorsLayer::new()
+        .allow_origin(AllowOrigin::predicate(move |origin, _| {
+            allowed.iter().any(|candidate| candidate == origin)
+        }))
+        .allow_methods([Method::GET, Method::OPTIONS])
+        .allow_headers([header::ACCEPT, header::CONTENT_TYPE])
+        .max_age(std::time::Duration::from_secs(3600))
+}
+
 // ---- Rate-limit middleware ----------------------------------------------
 
 async fn rate_limit_middleware(
@@ -293,8 +328,7 @@ async fn main() -> anyhow::Result<()> {
             .or_else(|| args.db.clone())
             .unwrap_or_else(|| {
                 if cfg!(windows) {
-                    std::env::var("TEMP")
-                        .unwrap_or_else(|_| "C:\\Temp".to_string())
+                    std::env::var("TEMP").unwrap_or_else(|_| "C:\\Temp".to_string())
                         + "\\oversight-registry.sqlite"
                 } else {
                     "/tmp/oversight-registry.sqlite".to_string()
@@ -308,8 +342,7 @@ async fn main() -> anyhow::Result<()> {
             .or_else(|| args.data_dir.clone())
             .unwrap_or_else(|| {
                 if cfg!(windows) {
-                    std::env::var("TEMP")
-                        .unwrap_or_else(|_| "C:\\Temp".to_string())
+                    std::env::var("TEMP").unwrap_or_else(|_| "C:\\Temp".to_string())
                         + "\\oversight-data"
                 } else {
                     "/tmp/oversight-data".to_string()
@@ -317,10 +350,7 @@ async fn main() -> anyhow::Result<()> {
             }),
     );
 
-    let trusted_proxy = std::env::var("TRUSTED_PROXY")
-        .unwrap_or_default()
-        .trim()
-        == "1";
+    let trusted_proxy = std::env::var("TRUSTED_PROXY").unwrap_or_default().trim() == "1";
 
     let rekor_enabled = std::env::var("OVERSIGHT_REKOR_ENABLED")
         .unwrap_or_default()
@@ -373,15 +403,38 @@ async fn main() -> anyhow::Result<()> {
     // Build router.
     let app = Router::new()
         .route("/health", get(routes::health::health))
+        .route(
+            "/.well-known/oversight-registry",
+            get(routes::well_known::well_known),
+        )
         .route("/register", post(routes::register::register))
         .route("/attribute", post(routes::attribute::attribute))
         .route("/query/:file_id", get(routes::query::query_file))
+        .route("/evidence/:file_id", get(routes::evidence::evidence_bundle))
+        .route("/tlog/head", get(routes::tlog::tlog_head))
+        .route("/tlog/proof/:index", get(routes::tlog::tlog_proof))
+        .route("/tlog/range", get(routes::tlog::tlog_range))
+        .route("/p/:token_id", get(routes::beacon::beacon_png))
+        .route(
+            "/r/:token_id",
+            get(routes::beacon::beacon_ocsp).post(routes::beacon::beacon_ocsp),
+        )
+        .route(
+            "/ocsp/r/:token_id",
+            get(routes::beacon::beacon_ocsp).post(routes::beacon::beacon_ocsp),
+        )
+        .route("/v/:token_id", get(routes::beacon::beacon_license))
+        .route("/lic/v/:token_id", get(routes::beacon::beacon_license))
+        .route(
+            "/candidates/semantic",
+            get(routes::semantic::candidates_semantic),
+        )
         .route("/dns_event", post(routes::dns_event::dns_event))
         .layer(middleware::from_fn_with_state(
             state.clone(),
             rate_limit_middleware,
         ))
-        .layer(CorsLayer::permissive())
+        .layer(cors_layer())
         .layer(TraceLayer::new_for_http())
         .with_state(state);
 
