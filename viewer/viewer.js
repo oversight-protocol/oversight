@@ -240,12 +240,14 @@ async function hkdfSha256(ikm, info, length) {
   return new Uint8Array(bits);
 }
 
-export async function decryptSealed(parsed, identity, xchachaAead) {
+export async function decryptSealed(parsed, identity, xchachaAead, mlKem768) {
+  if (parsed.suiteId === 2) {
+    return decryptSealedHybrid(parsed, identity, xchachaAead, mlKem768);
+  }
   if (parsed.suiteId !== 1) {
     throw new Error(
-      'in-browser decrypt currently supports the classic suite only '
-      + `(got suite_id=${parsed.suiteId}, ${parsed.suiteName}). `
-      + 'Hybrid (post-quantum) decrypt is on the roadmap.'
+      `unsupported suite_id ${parsed.suiteId} (${parsed.suiteName}); `
+      + 'in-browser decrypt supports classic (1) and hybrid (2).'
     );
   }
   if (!parsed.wrappedDek || !parsed.wrappedDek.ephemeral_pub || !parsed.wrappedDek.nonce || !parsed.wrappedDek.wrapped_dek) {
@@ -331,6 +333,148 @@ export async function decryptSealed(parsed, identity, xchachaAead) {
     throw new Error(
       'plaintext hash does not match manifest.content_hash after decryption'
     );
+  }
+
+  return plaintext;
+}
+
+// ---- Hybrid-suite decrypt (post-quantum) -----------------------------------
+// Matches oversight_core/crypto.py:hybrid_unwrap_dek + aead_decrypt.
+//
+//   ss_x  = X25519(recipient_priv, wrapped.x25519_ephemeral_pub)        (WebCrypto)
+//   ss_pq = ML-KEM-768.decap(recipient_mlkem_priv, wrapped.mlkem_ct)    (vendored noble)
+//   IKM   = ss_x || ss_pq || x25519_eph_pub || mlkem_ct                 (X-wing binding)
+//   KEK   = HKDF-SHA256(IKM, info=b"oversight-hybrid-v1-dek-wrap", L=32)
+//   DEK   = XChaCha20-Poly1305.decrypt(KEK, wrapped.nonce, wrapped_dek, aad=b"oversight-hybrid-dek")
+//   plain = XChaCha20-Poly1305.decrypt(DEK, parsed.aead_nonce, ciphertext, aad=manifest.content_hash.ascii)
+//
+// An attacker must break BOTH X25519 AND ML-KEM-768 to recover the KEK.
+
+export async function decryptSealedHybrid(parsed, identity, xchachaAead, mlKem768) {
+  if (parsed.suiteId !== 2) {
+    throw new Error(`decryptSealedHybrid called with non-hybrid suite_id=${parsed.suiteId}`);
+  }
+  if (!mlKem768 || typeof mlKem768.decapsulate !== 'function') {
+    throw new Error(
+      'hybrid decrypt requires ml_kem768 to be passed in. '
+      + "Import { ml_kem768 } from './vendor/noble-post-quantum-ml-kem-0.6.1.js' "
+      + 'and pass it as the 4th argument to decryptSealed.'
+    );
+  }
+  const w = parsed.wrappedDek || {};
+  for (const k of ['x25519_ephemeral_pub', 'mlkem_ciphertext', 'nonce', 'wrapped_dek']) {
+    if (!w[k]) {
+      throw new Error(`hybrid wrapped_dek envelope missing field: ${k}`);
+    }
+  }
+  if (!identity || typeof identity !== 'object') {
+    throw new Error('identity must be an object with x25519_priv, x25519_pub, mlkem_priv, mlkem_pub');
+  }
+  for (const k of ['x25519_priv', 'x25519_pub', 'mlkem_priv', 'mlkem_pub']) {
+    if (!identity[k]) {
+      throw new Error(`hybrid identity is missing required field: ${k}`);
+    }
+  }
+
+  const x25519Priv = hexToBytes(identity.x25519_priv);
+  const x25519SelfPub = hexToBytes(identity.x25519_pub);
+  const mlkemPriv = hexToBytes(identity.mlkem_priv);
+  const mlkemPub = hexToBytes(identity.mlkem_pub);
+
+  if (x25519Priv.length !== 32 || x25519SelfPub.length !== 32) {
+    throw new Error('x25519 priv and pub must be 32 bytes each (64 hex chars)');
+  }
+  // FIPS 203 ML-KEM-768: secret key 2400 bytes, public key 1184 bytes.
+  if (mlkemPriv.length !== 2400) {
+    throw new Error(`ML-KEM-768 priv must be 2400 bytes (4800 hex chars), got ${mlkemPriv.length}`);
+  }
+  if (mlkemPub.length !== 1184) {
+    throw new Error(`ML-KEM-768 pub must be 1184 bytes (2368 hex chars), got ${mlkemPub.length}`);
+  }
+
+  // Cross-check that the identity matches the manifest's recipient.
+  const recip = parsed.manifest.recipient || {};
+  if (recip.x25519_pub && recip.x25519_pub.toLowerCase() !== identity.x25519_pub.toLowerCase()) {
+    throw new Error(
+      'identity x25519_pub does not match manifest.recipient.x25519_pub; '
+      + 'this hybrid sealed file was not addressed to the supplied identity.'
+    );
+  }
+  if (recip.mlkem_pub && recip.mlkem_pub.toLowerCase() !== identity.mlkem_pub.toLowerCase()) {
+    throw new Error(
+      'identity mlkem_pub does not match manifest.recipient.mlkem_pub; '
+      + 'this hybrid sealed file was not addressed to the supplied identity.'
+    );
+  }
+
+  const ephPub = hexToBytes(w.x25519_ephemeral_pub);
+  const mlkemCt = hexToBytes(w.mlkem_ciphertext);
+  const wrappedNonce = hexToBytes(w.nonce);
+  const wrappedDek = hexToBytes(w.wrapped_dek);
+  if (mlkemCt.length !== 1088) {
+    throw new Error(`ML-KEM-768 ciphertext must be 1088 bytes, got ${mlkemCt.length}`);
+  }
+
+  let ssX;
+  try {
+    ssX = await webcryptoX25519Shared(x25519Priv, x25519SelfPub, ephPub);
+  } catch (e) {
+    throw new Error(
+      'X25519 key agreement failed. Browser may not support WebCrypto X25519: ' + e.message
+    );
+  }
+
+  let ssPq;
+  try {
+    ssPq = mlKem768.decapsulate(mlkemCt, mlkemPriv);
+  } catch (e) {
+    throw new Error('ML-KEM-768 decapsulation failed: ' + e.message);
+  }
+  if (!(ssPq instanceof Uint8Array) || ssPq.length !== 32) {
+    throw new Error(`ML-KEM-768 shared secret must be 32 bytes, got ${ssPq && ssPq.length}`);
+  }
+
+  // X-wing-style binding: bind KEK to the full encapsulation, not just the secrets.
+  const ikm = new Uint8Array(ssX.length + ssPq.length + ephPub.length + mlkemCt.length);
+  let off = 0;
+  ikm.set(ssX, off); off += ssX.length;
+  ikm.set(ssPq, off); off += ssPq.length;
+  ikm.set(ephPub, off); off += ephPub.length;
+  ikm.set(mlkemCt, off);
+
+  const kek = await hkdfSha256(ikm, new TextEncoder().encode('oversight-hybrid-v1-dek-wrap'), 32);
+
+  const kekAead = xchachaAead(kek, wrappedNonce, new TextEncoder().encode('oversight-hybrid-dek'));
+  let dek;
+  try {
+    dek = kekAead.decrypt(wrappedDek);
+  } catch (e) {
+    throw new Error(
+      'Hybrid DEK unwrap failed. Either x25519_priv or mlkem_priv does not match the '
+      + 'recipient declared in the manifest.'
+    );
+  }
+
+  // Outer ciphertext: identical construction to classic.
+  const aeadNonce = parsed.aeadNonce;
+  if (aeadNonce.length !== 24) {
+    throw new Error(`aead_nonce must be 24 bytes, got ${aeadNonce.length}`);
+  }
+  if (!parsed._ciphertextFull || parsed.ciphertextLen === 0) {
+    throw new Error('sealed file has no ciphertext');
+  }
+  const contentAad = new TextEncoder().encode(parsed.manifest.content_hash);
+  const outerAead = xchachaAead(dek, aeadNonce, contentAad);
+  let plaintext;
+  try {
+    plaintext = outerAead.decrypt(parsed._ciphertextFull);
+  } catch (e) {
+    throw new Error('ciphertext decrypt failed (tag mismatch). The manifest may have been tampered with.');
+  }
+
+  const actual = await sha256Hex(plaintext);
+  if (actual.toLowerCase() !== String(parsed.manifest.content_hash || '').toLowerCase()) {
+    throw new Error('plaintext hash does not match manifest.content_hash after decryption');
   }
 
   return plaintext;

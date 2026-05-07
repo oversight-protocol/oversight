@@ -140,7 +140,9 @@
       <a href="samples/hello-alice-tampered.sealed" download>hello-alice-tampered.sealed</a>
       (signature invalid),
       <a href="samples/tutorial.sealed" download>tutorial.sealed</a>
-      (decryptable with the tutorial identity).
+      (classic suite, decryptable with the tutorial identity),
+      <a href="samples/tutorial-hybrid.sealed" download>tutorial-hybrid.sealed</a>
+      (hybrid post-quantum suite, decryptable with the hybrid tutorial identity).
       Drop any of them into the inspector above.
     </p>
 
@@ -172,19 +174,20 @@
       <h2 class="section-heading">Decrypt in browser</h2>
       <p style="color:var(--text-secondary);font-size:14px;">
         Paste or upload the recipient <code>identity.json</code> (as produced by
-        <code>oversight keygen</code>). The X25519 private key stays in memory;
-        decryption runs locally using WebCrypto for key agreement and a vendored
-        copy of <code>@noble/ciphers</code> for XChaCha20-Poly1305. Hybrid
-        (post-quantum) sealed files are on the roadmap and will not decrypt here
-        yet.
+        <code>oversight keygen</code>). Private keys stay in memory; decryption
+        runs locally using WebCrypto for X25519 + HKDF, a vendored copy of
+        <code>@noble/ciphers</code> for XChaCha20-Poly1305, and a vendored copy
+        of <code>@noble/post-quantum</code> for ML-KEM-768 when the file is
+        hybrid (post-quantum). Both classic and hybrid suites decrypt here.
       </p>
       <div class="registry-actions" style="flex-direction:column;align-items:stretch;gap:8px;">
         <input id="identity-file" type="file" accept=".json,application/json" style="color:var(--text-secondary);">
-        <textarea id="identity-text" rows="4" placeholder='Or paste identity JSON: {"x25519_priv":"...","x25519_pub":"..."}'
+        <textarea id="identity-text" rows="4" placeholder='Or paste identity JSON: {"x25519_priv":"...","x25519_pub":"..."} (hybrid identities also include mlkem_priv/mlkem_pub)'
           style="width:100%;background:var(--bg-secondary);border:1px solid var(--border);color:var(--text-primary);border-radius:6px;padding:10px;font-family:var(--font-mono);font-size:12px;"></textarea>
-        <div style="display:flex;gap:8px;">
+        <div style="display:flex;gap:8px;flex-wrap:wrap;">
           <button id="btn-decrypt" class="btn btn-primary" type="button">Decrypt</button>
           <button id="btn-try-tutorial" class="btn btn-secondary" type="button">Load tutorial identity</button>
+          <button id="btn-try-tutorial-hybrid" class="btn btn-secondary" type="button">Load hybrid tutorial identity</button>
           <button id="btn-download-plaintext" class="btn btn-secondary" type="button" disabled>Download plaintext</button>
         </div>
       </div>
@@ -222,6 +225,7 @@
 <script type="module">
 import { parseSealed, verifyManifestSignature, sha256Hex, decryptSealed } from './viewer.js';
 import { xchacha20poly1305 } from './vendor/noble-ciphers-chacha-1.3.0.js';
+import { ml_kem768 } from './vendor/noble-post-quantum-ml-kem-0.6.1.js';
 
 const drop = document.getElementById('drop');
 const fileInput = document.getElementById('file-input');
@@ -514,6 +518,17 @@ document.getElementById('btn-try-tutorial').addEventListener('click', async () =
   }
 });
 
+document.getElementById('btn-try-tutorial-hybrid').addEventListener('click', async () => {
+  try {
+    const resp = await fetch('samples/tutorial-hybrid-identity.json');
+    const text = await resp.text();
+    document.getElementById('identity-text').value = text;
+    setDecryptOutput('info', 'Hybrid tutorial identity loaded (X25519 + ML-KEM-768). PUBLIC demo key, do not use for real content. Drop tutorial-hybrid.sealed into the inspector to exercise the post-quantum decrypt path.');
+  } catch (e) {
+    setDecryptOutput('error', 'Could not fetch hybrid tutorial identity: ' + e.message);
+  }
+});
+
 document.getElementById('btn-decrypt').addEventListener('click', async () => {
   const dlBtn = document.getElementById('btn-download-plaintext');
   dlBtn.disabled = true;
@@ -536,7 +551,7 @@ document.getElementById('btn-decrypt').addEventListener('click', async () => {
   }
 
   try {
-    const plaintext = await decryptSealed(lastParsed, identity, xchacha20poly1305);
+    const plaintext = await decryptSealed(lastParsed, identity, xchacha20poly1305, ml_kem768);
     lastPlaintext = plaintext;
     dlBtn.disabled = false;
     let preview;
