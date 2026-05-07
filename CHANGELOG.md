@@ -2,6 +2,21 @@
 
 ## Unreleased
 
+- **`oversight-crypto`: `OSGT-HW-P256-v1` suite implementation (2026-05-07).**
+  P-256 ECDH wrap/unwrap landed alongside the X25519 path so hardware-backed
+  recipients (YubiKey / Nitrokey / OnlyKey via PIV) have a complete pure-Rust
+  reference to plug into. `wrap_dek_for_recipient_p256` accepts SEC1
+  uncompressed (65 byte) recipient public keys and produces `WrappedDekP256`.
+  `SoftwareP256KeyProvider` is the in-memory `KeyProvider` impl that
+  `PivKeyProvider` will mirror against PKCS#11 next. Cross-suite envelopes
+  are rejected explicitly: an X25519 provider passed to a P-256 envelope
+  errors out instead of producing garbage. Eight new unit tests covering
+  round trips, wrong-recipient rejection, cross-suite rejection, JSON
+  envelope round-trip, and a regression check that the classic path still
+  works. `SUITE_HW_P256_V1` constant exported. Adds `p256` (RustCrypto) to
+  workspace deps with `ecdh` + `arithmetic` features. `oversight-crypto`
+  passes 21/21; workspace build clean.
+
 - **`oversight-crypto`: `KeyProvider` trait + `FileKeyProvider` (2026-05-07).**
   The recipient-side ECDH path is now abstracted behind `pub trait KeyProvider`,
   with `FileKeyProvider` shipping as the X25519 file-backed default. New

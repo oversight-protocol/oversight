@@ -9,6 +9,7 @@ description = "Cryptographic primitives for Oversight: X25519, Ed25519, XChaCha2
 [dependencies]
 x25519-dalek.workspace = true
 ed25519-dalek.workspace = true
+p256.workspace = true
 chacha20poly1305.workspace = true
 hkdf.workspace = true
 sha2.workspace = true

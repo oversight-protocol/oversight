@@ -212,10 +212,16 @@ recipient-side ECDH so a hardware backend can plug in without changing
 call sites; `unwrap_dek_with_provider` is the new entry point and is
 byte-identical to `unwrap_dek` for file-backed keys.
 
+**`OSGT-HW-P256-v1` suite implementation landed 2026-05-07.** P-256 ECDH
+wrap/unwrap, `WrappedDekP256` envelope, and `SoftwareP256KeyProvider`
+(in-memory P-256 reference impl) are in `oversight-crypto`. Cross-suite
+envelopes are rejected explicitly. 21/21 tests in the crate pass.
+
 The remaining work is the `PivKeyProvider` (PKCS#11 against a YubiKey /
-Nitrokey / OnlyKey PIV slot) and the `OSGT-HW-P256-v1` suite that goes
-with it: P-256 ECDH wire format on the wrap side, manifest suite-id
-plumbing, and the open-side decrypt path that branches on suite. The
+Nitrokey / OnlyKey PIV slot) — a different `KeyProvider` impl that calls
+into `cryptoki` instead of holding the scalar in process — plus the
+manifest / container plumbing that lets `OSGT-HW-P256-v1` ride the
+existing seal pipeline. The
 registry records whether each recipient pubkey is file-backed or
 hardware-backed so issuers can require hardware backing for sensitive
 material.

@@ -38,6 +38,11 @@ use sha2::{Digest, Sha256};
 use thiserror::Error;
 use x25519_dalek::{PublicKey as X25519PublicKey, StaticSecret as X25519StaticSecret};
 use zeroize::{Zeroize, Zeroizing};
+use p256::{
+    ecdh::diffie_hellman as p256_diffie_hellman,
+    elliptic_curve::sec1::ToEncodedPoint,
+    PublicKey as P256PublicKey, SecretKey as P256SecretKey,
+};
 
 pub const XCHACHA_KEY_LEN: usize = 32;
 pub const XCHACHA_NONCE_LEN: usize = 24;
@@ -45,9 +50,15 @@ pub const X25519_KEY_LEN: usize = 32;
 pub const ED25519_KEY_LEN: usize = 32;
 pub const ED25519_SIG_LEN: usize = 64;
 pub const DEK_LEN: usize = 32;
+/// P-256 public key in SEC1 uncompressed encoding (`0x04 || X || Y`).
+pub const P256_PUBLIC_KEY_LEN: usize = 65;
 
 pub const SUITE_CLASSIC_V1: &str = "OSGT-CLASSIC-v1";
 pub const SUITE_HYBRID_V1: &str = "OSGT-HYBRID-v1";
+/// Hardware-backed recipients use P-256 ECDH so PIV-compatible tokens
+/// (YubiKey, Nitrokey, OnlyKey) can perform the key agreement on-device
+/// without exposing the private scalar. See `docs/HARDWARE_KEYS.md`.
+pub const SUITE_HW_P256_V1: &str = "OSGT-HW-P256-v1";
 
 #[derive(Debug, Error)]
 pub enum CryptoError {
@@ -432,6 +443,210 @@ pub fn unwrap_dek_with_provider(
     Ok(Zeroizing::new(plaintext))
 }
 
+// -------------------------- P-256 (hardware-backed suite) -------------------
+
+/// In-memory P-256 keypair. Mirrors [`ClassicIdentity`] but for the
+/// `OSGT-HW-P256-v1` suite. Use this in tests and as a software fallback when
+/// a hardware token is not plugged in. Real hardware-backed providers (PIV
+/// over PKCS#11) implement [`KeyProvider`] without holding the private scalar
+/// in process memory.
+pub struct SoftwareP256Identity {
+    secret: P256SecretKey,
+    public_sec1: [u8; P256_PUBLIC_KEY_LEN],
+}
+
+impl SoftwareP256Identity {
+    pub fn generate() -> Self {
+        let secret = P256SecretKey::random(&mut OsRng);
+        let public = secret.public_key();
+        let encoded = public.to_encoded_point(false);
+        let bytes = encoded.as_bytes();
+        debug_assert_eq!(bytes.len(), P256_PUBLIC_KEY_LEN);
+        let mut public_sec1 = [0u8; P256_PUBLIC_KEY_LEN];
+        public_sec1.copy_from_slice(bytes);
+        Self { secret, public_sec1 }
+    }
+
+    pub fn public_key_sec1(&self) -> &[u8; P256_PUBLIC_KEY_LEN] {
+        &self.public_sec1
+    }
+}
+
+/// Wrapped DEK for the `OSGT-HW-P256-v1` suite. Differs from [`WrappedDek`]
+/// only in the size and encoding of the ephemeral public key (SEC1
+/// uncompressed, 65 bytes).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WrappedDekP256 {
+    pub ephemeral_pub: [u8; P256_PUBLIC_KEY_LEN],
+    pub nonce: [u8; XCHACHA_NONCE_LEN],
+    pub wrapped_dek: Vec<u8>,
+}
+
+impl WrappedDekP256 {
+    pub fn to_json_hex(&self) -> serde_json::Value {
+        serde_json::json!({
+            "suite": SUITE_HW_P256_V1,
+            "ephemeral_pub": hex::encode(self.ephemeral_pub),
+            "nonce": hex::encode(self.nonce),
+            "wrapped_dek": hex::encode(&self.wrapped_dek),
+        })
+    }
+
+    pub fn from_json_hex(v: &serde_json::Value) -> Result<Self, CryptoError> {
+        fn field(v: &serde_json::Value, name: &'static str) -> Result<String, CryptoError> {
+            v.get(name)
+                .and_then(|x| x.as_str())
+                .map(str::to_string)
+                .ok_or(CryptoError::MissingField(name))
+        }
+        let eph_bytes = hex::decode(field(v, "ephemeral_pub")?)?;
+        let nonce_bytes = hex::decode(field(v, "nonce")?)?;
+        let wrapped = hex::decode(field(v, "wrapped_dek")?)?;
+        if eph_bytes.len() != P256_PUBLIC_KEY_LEN {
+            return Err(CryptoError::InvalidKeyLength {
+                expected: P256_PUBLIC_KEY_LEN,
+                got: eph_bytes.len(),
+            });
+        }
+        if nonce_bytes.len() != XCHACHA_NONCE_LEN {
+            return Err(CryptoError::InvalidKeyLength {
+                expected: XCHACHA_NONCE_LEN,
+                got: nonce_bytes.len(),
+            });
+        }
+        let mut eph = [0u8; P256_PUBLIC_KEY_LEN];
+        eph.copy_from_slice(&eph_bytes);
+        let mut nonce = [0u8; XCHACHA_NONCE_LEN];
+        nonce.copy_from_slice(&nonce_bytes);
+        Ok(WrappedDekP256 { ephemeral_pub: eph, nonce, wrapped_dek: wrapped })
+    }
+}
+
+/// Wrap a DEK for a P-256 recipient. The sender holds no hardware key; the
+/// ephemeral keypair is generated locally in software and the recipient's
+/// public key is consumed in SEC1 form.
+pub fn wrap_dek_for_recipient_p256(
+    dek: &[u8],
+    recipient_p256_pub_sec1: &[u8],
+) -> Result<WrappedDekP256, CryptoError> {
+    if recipient_p256_pub_sec1.len() != P256_PUBLIC_KEY_LEN {
+        return Err(CryptoError::InvalidKeyLength {
+            expected: P256_PUBLIC_KEY_LEN,
+            got: recipient_p256_pub_sec1.len(),
+        });
+    }
+    let recipient_pub = P256PublicKey::from_sec1_bytes(recipient_p256_pub_sec1)
+        .map_err(|_| CryptoError::InvalidKeyLength {
+            expected: P256_PUBLIC_KEY_LEN,
+            got: recipient_p256_pub_sec1.len(),
+        })?;
+
+    let eph_secret = P256SecretKey::random(&mut OsRng);
+    let eph_pub = eph_secret.public_key();
+    let eph_pub_encoded = eph_pub.to_encoded_point(false);
+    let eph_pub_bytes = eph_pub_encoded.as_bytes();
+    if eph_pub_bytes.len() != P256_PUBLIC_KEY_LEN {
+        return Err(CryptoError::InvalidKeyLength {
+            expected: P256_PUBLIC_KEY_LEN,
+            got: eph_pub_bytes.len(),
+        });
+    }
+    let mut eph_pub_arr = [0u8; P256_PUBLIC_KEY_LEN];
+    eph_pub_arr.copy_from_slice(eph_pub_bytes);
+
+    let shared = p256_diffie_hellman(eph_secret.to_nonzero_scalar(), recipient_pub.as_affine());
+    let shared_bytes = shared.raw_secret_bytes();
+
+    let hk = Hkdf::<Sha256>::new(None, shared_bytes.as_ref());
+    let mut kek = Zeroizing::new([0u8; 32]);
+    hk.expand(b"oversight-hw-p256-v1-dek-wrap", kek.as_mut())
+        .map_err(|_| CryptoError::Hkdf)?;
+
+    let (nonce, wrapped) = aead_encrypt(kek.as_ref(), dek, b"oversight-hw-p256-dek")?;
+    Ok(WrappedDekP256 { ephemeral_pub: eph_pub_arr, nonce, wrapped_dek: wrapped })
+}
+
+/// Software-backed P-256 [`KeyProvider`]. Useful for tests and as a fallback
+/// when the user does not have a hardware token available. A future
+/// `PivKeyProvider` implements the same trait against PKCS#11.
+pub struct SoftwareP256KeyProvider {
+    inner: SoftwareP256Identity,
+    label: Option<String>,
+}
+
+impl SoftwareP256KeyProvider {
+    pub fn new(identity: SoftwareP256Identity) -> Self {
+        Self { inner: identity, label: None }
+    }
+
+    pub fn with_label(identity: SoftwareP256Identity, label: impl Into<String>) -> Self {
+        Self { inner: identity, label: Some(label.into()) }
+    }
+
+    pub fn identity(&self) -> &SoftwareP256Identity {
+        &self.inner
+    }
+}
+
+impl KeyProvider for SoftwareP256KeyProvider {
+    fn algorithm(&self) -> KeyAlgorithm {
+        KeyAlgorithm::P256
+    }
+
+    fn public_key(&self) -> &[u8] {
+        &self.inner.public_sec1
+    }
+
+    fn ecdh(&self, peer_pub: &[u8]) -> Result<Zeroizing<Vec<u8>>, CryptoError> {
+        if peer_pub.len() != P256_PUBLIC_KEY_LEN {
+            return Err(CryptoError::InvalidKeyLength {
+                expected: P256_PUBLIC_KEY_LEN,
+                got: peer_pub.len(),
+            });
+        }
+        let peer = P256PublicKey::from_sec1_bytes(peer_pub).map_err(|_| {
+            CryptoError::InvalidKeyLength {
+                expected: P256_PUBLIC_KEY_LEN,
+                got: peer_pub.len(),
+            }
+        })?;
+        let shared = p256_diffie_hellman(self.inner.secret.to_nonzero_scalar(), peer.as_affine());
+        Ok(Zeroizing::new(shared.raw_secret_bytes().to_vec()))
+    }
+
+    fn label(&self) -> Option<&str> {
+        self.label.as_deref()
+    }
+}
+
+/// Recipient-side DEK unwrap for the `OSGT-HW-P256-v1` suite. Mirrors
+/// [`unwrap_dek_with_provider`] but for P-256 envelopes.
+pub fn unwrap_dek_with_provider_p256(
+    wrapped: &WrappedDekP256,
+    provider: &dyn KeyProvider,
+) -> Result<Zeroizing<Vec<u8>>, CryptoError> {
+    if provider.algorithm() != KeyAlgorithm::P256 {
+        return Err(CryptoError::InvalidKeyLength {
+            expected: P256_PUBLIC_KEY_LEN,
+            got: provider.public_key().len(),
+        });
+    }
+    let shared = provider.ecdh(&wrapped.ephemeral_pub)?;
+
+    let hk = Hkdf::<Sha256>::new(None, shared.as_ref());
+    let mut kek = Zeroizing::new([0u8; 32]);
+    hk.expand(b"oversight-hw-p256-v1-dek-wrap", kek.as_mut())
+        .map_err(|_| CryptoError::Hkdf)?;
+
+    let plaintext = aead_decrypt(
+        kek.as_ref(),
+        &wrapped.nonce,
+        &wrapped.wrapped_dek,
+        b"oversight-hw-p256-dek",
+    )?;
+    Ok(Zeroizing::new(plaintext))
+}
+
 // -------------------------- Signatures --------------------------
 
 pub fn sign_message(msg: &[u8], ed25519_priv: &[u8]) -> Result<[u8; ED25519_SIG_LEN], CryptoError> {
@@ -629,5 +844,105 @@ mod tests {
         // Bob's provider should fail to recover the DEK.
         let res = unwrap_dek_with_provider(&wrapped, &provider_bob);
         assert!(res.is_err(), "Bob's provider must not unwrap a DEK addressed to Alice");
+    }
+
+    // ------- P-256 (OSGT-HW-P256-v1) ----------------------------------------
+
+    #[test]
+    fn p256_identity_public_key_starts_with_sec1_uncompressed_tag() {
+        // SEC1 uncompressed encoding always starts with 0x04.
+        let id = SoftwareP256Identity::generate();
+        assert_eq!(id.public_key_sec1()[0], 0x04);
+        assert_eq!(id.public_key_sec1().len(), P256_PUBLIC_KEY_LEN);
+    }
+
+    #[test]
+    fn p256_provider_advertises_p256() {
+        let id = SoftwareP256Identity::generate();
+        let pub_copy = *id.public_key_sec1();
+        let provider = SoftwareP256KeyProvider::new(id);
+        assert_eq!(provider.algorithm(), KeyAlgorithm::P256);
+        assert_eq!(provider.public_key(), &pub_copy[..]);
+    }
+
+    #[test]
+    fn p256_wrap_unwrap_round_trip() {
+        let alice = SoftwareP256Identity::generate();
+        let alice_pub = *alice.public_key_sec1();
+        let provider = SoftwareP256KeyProvider::new(alice);
+
+        let dek = random_dek();
+        let wrapped = wrap_dek_for_recipient_p256(dek.as_ref(), &alice_pub).unwrap();
+        let recovered = unwrap_dek_with_provider_p256(&wrapped, &provider).unwrap();
+        assert_eq!(&recovered[..], dek.as_ref());
+    }
+
+    #[test]
+    fn p256_wrong_recipient_rejected() {
+        let alice = SoftwareP256Identity::generate();
+        let alice_pub = *alice.public_key_sec1();
+        let bob = SoftwareP256Identity::generate();
+        let provider_bob = SoftwareP256KeyProvider::new(bob);
+
+        let dek = random_dek();
+        let wrapped = wrap_dek_for_recipient_p256(dek.as_ref(), &alice_pub).unwrap();
+
+        let res = unwrap_dek_with_provider_p256(&wrapped, &provider_bob);
+        assert!(res.is_err(), "Bob's P-256 provider must not unwrap a DEK addressed to Alice");
+    }
+
+    #[test]
+    fn p256_unwrap_rejects_x25519_provider() {
+        // Cross-suite mismatch: an X25519 file provider must not be accepted
+        // for a P-256 envelope (silently producing garbage would be worse
+        // than refusing).
+        let alice_p256 = SoftwareP256Identity::generate();
+        let alice_pub = *alice_p256.public_key_sec1();
+        let dek = random_dek();
+        let wrapped = wrap_dek_for_recipient_p256(dek.as_ref(), &alice_pub).unwrap();
+
+        let bob_x25519 = FileKeyProvider::new(ClassicIdentity::generate());
+        let res = unwrap_dek_with_provider_p256(&wrapped, &bob_x25519);
+        assert!(res.is_err(), "X25519 provider must not be accepted for a P-256 envelope");
+    }
+
+    #[test]
+    fn p256_unwrap_rejects_wrong_ephemeral_length() {
+        let id = SoftwareP256Identity::generate();
+        let provider = SoftwareP256KeyProvider::new(id);
+        let err = provider.ecdh(&[0u8; 32]).unwrap_err();
+        match err {
+            CryptoError::InvalidKeyLength { expected, got } => {
+                assert_eq!(expected, P256_PUBLIC_KEY_LEN);
+                assert_eq!(got, 32);
+            }
+            other => panic!("expected InvalidKeyLength, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn p256_wrapped_dek_json_round_trip() {
+        let alice = SoftwareP256Identity::generate();
+        let alice_pub = *alice.public_key_sec1();
+        let dek = random_dek();
+        let wrapped = wrap_dek_for_recipient_p256(dek.as_ref(), &alice_pub).unwrap();
+        let json = wrapped.to_json_hex();
+        // Suite is recorded explicitly so a polymorphic envelope reader can
+        // dispatch without inspecting the ephemeral key length.
+        assert_eq!(json["suite"].as_str(), Some(SUITE_HW_P256_V1));
+        let parsed = WrappedDekP256::from_json_hex(&json).unwrap();
+        assert_eq!(wrapped, parsed);
+    }
+
+    #[test]
+    fn p256_unwrap_x25519_provider_classic_envelope_still_works() {
+        // Sanity: adding the P-256 suite must not regress the classic path.
+        let alice = ClassicIdentity::generate();
+        let alice_pub = alice.x25519_pub;
+        let provider = FileKeyProvider::new(alice);
+        let dek = random_dek();
+        let wrapped = wrap_dek_for_recipient(dek.as_ref(), &alice_pub).unwrap();
+        let recovered = unwrap_dek_with_provider(&wrapped, &provider).unwrap();
+        assert_eq!(&recovered[..], dek.as_ref());
     }
 }
