@@ -28,9 +28,17 @@ pub enum ManifestError {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct Recipient {
     pub recipient_id: String,
+    /// X25519 public key (hex). Empty when the recipient is hardware-backed
+    /// and only `p256_pub` is populated.
+    #[serde(default)]
     pub x25519_pub: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub ed25519_pub: Option<String>,
+    /// P-256 public key in SEC1 uncompressed encoding (hex). Populated for
+    /// `OSGT-HW-P256-v1` recipients; absent for classic / hybrid recipients.
+    /// Optional + skipped when None so existing manifests deserialize unchanged.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub p256_pub: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -224,6 +232,7 @@ mod tests {
                 recipient_id: "alice@test".into(),
                 x25519_pub: hex::encode(recipient.x25519_pub),
                 ed25519_pub: None,
+                p256_pub: None,
             },
             "https://registry.test",
             "text/plain",
@@ -254,6 +263,7 @@ mod tests {
                 recipient_id: "alice@test".into(),
                 x25519_pub: hex::encode(recipient.x25519_pub),
                 ed25519_pub: None,
+                p256_pub: None,
             },
             "https://registry.test",
             "text/plain",
@@ -283,6 +293,7 @@ mod tests {
                 recipient_id: "alice@test".into(),
                 x25519_pub: hex::encode(recipient.x25519_pub),
                 ed25519_pub: None,
+                p256_pub: None,
             },
             "https://registry.test",
             "text/plain",

@@ -199,6 +199,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                     recipient_id,
                     x25519_pub: hex::encode(&recipient_pub_bytes),
                     ed25519_pub: None,
+                    p256_pub: None,
                 },
                 registry,
                 "application/octet-stream",

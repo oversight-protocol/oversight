@@ -19,7 +19,9 @@
 //! ...     C         ciphertext (XChaCha20-Poly1305(plaintext))
 //! ```
 
-use oversight_crypto::{self as crypto, CryptoError, WrappedDek};
+use oversight_crypto::{
+    self as crypto, CryptoError, KeyAlgorithm, KeyProvider, WrappedDek, WrappedDekP256,
+};
 use oversight_manifest::{Manifest, ManifestError};
 use oversight_policy::{self, PolicyContext};
 use thiserror::Error;
@@ -333,6 +335,157 @@ pub fn open_sealed(
     Ok((plaintext, sf.manifest))
 }
 
+/// Seal `plaintext` for a hardware-backed P-256 recipient (`OSGT-HW-P256-v1`).
+///
+/// Mirrors [`seal`] but consumes the recipient's P-256 SEC1 uncompressed
+/// public key (65 bytes) instead of an X25519 public key. The manifest's
+/// `suite` field must already be set to `oversight_crypto::SUITE_HW_P256_V1`
+/// and the recipient's `p256_pub` field must hex-match `recipient_p256_sec1_pub`.
+/// All other invariants (content_hash, size_bytes, signature) match [`seal`].
+pub fn seal_hw_p256(
+    plaintext: &[u8],
+    manifest: &mut Manifest,
+    issuer_ed25519_priv: &[u8],
+    recipient_p256_sec1_pub: &[u8],
+) -> Result<Vec<u8>, ContainerError> {
+    if manifest.content_hash != crypto::content_hash(plaintext) {
+        return Err(ContainerError::Precondition(
+            "manifest.content_hash != sha256(plaintext)",
+        ));
+    }
+    if manifest.size_bytes != plaintext.len() as u64 {
+        return Err(ContainerError::Precondition(
+            "manifest.size_bytes != len(plaintext)",
+        ));
+    }
+    if manifest.suite != crypto::SUITE_HW_P256_V1 {
+        return Err(ContainerError::Precondition(
+            "manifest.suite must be OSGT-HW-P256-v1 for seal_hw_p256",
+        ));
+    }
+    let recipient = manifest
+        .recipient
+        .as_ref()
+        .ok_or(ContainerError::Precondition("manifest.recipient is None"))?;
+    let p256_pub_field = recipient
+        .p256_pub
+        .as_ref()
+        .ok_or(ContainerError::Precondition(
+            "manifest.recipient.p256_pub is None for OSGT-HW-P256-v1",
+        ))?;
+    if p256_pub_field != &hex::encode(recipient_p256_sec1_pub) {
+        return Err(ContainerError::Precondition(
+            "manifest.recipient.p256_pub mismatch with recipient pubkey",
+        ));
+    }
+    if recipient_p256_sec1_pub.len() != crypto::P256_PUBLIC_KEY_LEN {
+        return Err(ContainerError::Precondition(
+            "recipient p256 pubkey must be 65 bytes (SEC1 uncompressed)",
+        ));
+    }
+    if issuer_ed25519_priv.len() != 32 {
+        return Err(ContainerError::Precondition("issuer priv key must be 32 bytes"));
+    }
+
+    manifest.sign(issuer_ed25519_priv)?;
+
+    let dek = crypto::random_dek();
+    let wrapped = crypto::wrap_dek_for_recipient_p256(dek.as_ref(), recipient_p256_sec1_pub)?;
+    let aad = manifest.content_hash.as_bytes();
+    let (nonce, ct) = crypto::aead_encrypt(dek.as_ref(), plaintext, aad)?;
+
+    let sf = SealedFile {
+        manifest: manifest.clone(),
+        wrapped_dek: wrapped.to_json_hex(),
+        aead_nonce: nonce,
+        ciphertext: ct,
+        suite_id: SUITE_HW_P256_V1_ID,
+    };
+    sf.to_bytes()
+}
+
+/// Polymorphic open that dispatches on the container's `suite_id` and
+/// delegates the recipient-side ECDH to a [`KeyProvider`]. This is the entry
+/// point hardware-backed open paths (PIV via PKCS#11) use without changing
+/// the seal-side or container layout.
+///
+/// Currently dispatches:
+///   - `SUITE_CLASSIC_V1_ID` (1) ← provider must be [`KeyAlgorithm::X25519`]
+///   - `SUITE_HW_P256_V1_ID`  (3) ← provider must be [`KeyAlgorithm::P256`]
+///
+/// Hybrid (`SUITE_HYBRID_V1_ID` = 2) is not yet wired through this entry
+/// point because it needs both X25519 and ML-KEM-768 secrets at unwrap time
+/// (X-wing binding); a hybrid-aware provider trait extension lands with the
+/// follow-up `HybridKeyProvider`.
+pub fn open_sealed_with_provider(
+    blob: &[u8],
+    provider: &dyn KeyProvider,
+    trusted_issuer_pubs: Option<&[String]>,
+    policy_ctx: Option<&PolicyContext>,
+) -> Result<(Vec<u8>, Manifest), ContainerError> {
+    let sf = SealedFile::from_bytes(blob)?;
+    if !sf.manifest.verify()? {
+        return Err(ContainerError::Manifest(ManifestError::MissingSignature));
+    }
+
+    if let Some(trusted) = trusted_issuer_pubs {
+        if !trusted.iter().any(|p| p == &sf.manifest.issuer_ed25519_pub) {
+            return Err(ContainerError::Precondition("issuer not in trusted set"));
+        }
+    }
+
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs() as i64)
+        .unwrap_or(0);
+    if let Some(na) = sf.manifest.policy.get("not_after").and_then(|v| v.as_i64()) {
+        if now > na {
+            return Err(ContainerError::Precondition("file expired (not_after)"));
+        }
+    }
+    if let Some(nb) = sf.manifest.policy.get("not_before").and_then(|v| v.as_i64()) {
+        if now < nb {
+            return Err(ContainerError::Precondition("file not yet released (not_before)"));
+        }
+    }
+
+    let dek = match (sf.suite_id, provider.algorithm()) {
+        (SUITE_CLASSIC_V1_ID, KeyAlgorithm::X25519) => {
+            let wrapped = WrappedDek::from_json_hex(&sf.wrapped_dek)?;
+            crypto::unwrap_dek_with_provider(&wrapped, provider)?
+        }
+        (SUITE_HW_P256_V1_ID, KeyAlgorithm::P256) => {
+            let wrapped = WrappedDekP256::from_json_hex(&sf.wrapped_dek)?;
+            crypto::unwrap_dek_with_provider_p256(&wrapped, provider)?
+        }
+        (SUITE_HYBRID_V1_ID, _) => {
+            return Err(ContainerError::Precondition(
+                "OSGT-HYBRID-v1 open via provider not yet supported; use the legacy open path",
+            ));
+        }
+        (other_suite, _other_alg) => {
+            return Err(ContainerError::Precondition(
+                if other_suite == SUITE_CLASSIC_V1_ID || other_suite == SUITE_HW_P256_V1_ID {
+                    "provider algorithm does not match container suite_id"
+                } else {
+                    "unsupported suite_id in container header"
+                },
+            ));
+        }
+    };
+
+    let aad = sf.manifest.content_hash.as_bytes();
+    let plaintext = crypto::aead_decrypt(dek.as_ref(), &sf.aead_nonce, &sf.ciphertext, aad)?;
+
+    if crypto::content_hash(&plaintext) != sf.manifest.content_hash {
+        return Err(ContainerError::HashMismatch);
+    }
+
+    oversight_policy::record_open(&sf.manifest, policy_ctx)?;
+
+    Ok((plaintext, sf.manifest))
+}
+
 /// Fail closed until the manifest schema can explicitly bind every recipient.
 pub fn seal_multi(
     plaintext: &[u8],
@@ -349,7 +502,7 @@ pub fn seal_multi(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use oversight_crypto::ClassicIdentity;
+    use oversight_crypto::{ClassicIdentity, FileKeyProvider, SoftwareP256Identity, SoftwareP256KeyProvider};
     use oversight_manifest::Recipient;
 
     fn make_manifest(issuer: &ClassicIdentity, recipient: &ClassicIdentity, plaintext: &[u8]) -> Manifest {
@@ -363,6 +516,7 @@ mod tests {
                 recipient_id: "alice@test".into(),
                 x25519_pub: hex::encode(recipient.x25519_pub),
                 ed25519_pub: None,
+                p256_pub: None,
             },
             "https://registry.test",
             "text/plain",
@@ -370,6 +524,33 @@ mod tests {
             None,
             "GLOBAL",
         )
+    }
+
+    fn make_hw_manifest(
+        issuer: &ClassicIdentity,
+        recipient_p256_pub_sec1: &[u8],
+        plaintext: &[u8],
+    ) -> Manifest {
+        let mut m = Manifest::new(
+            "doc.txt",
+            crypto::content_hash(plaintext),
+            plaintext.len() as u64,
+            "issuer@test",
+            hex::encode(issuer.ed25519_pub),
+            Recipient {
+                recipient_id: "yubi@test".into(),
+                x25519_pub: String::new(),
+                ed25519_pub: None,
+                p256_pub: Some(hex::encode(recipient_p256_pub_sec1)),
+            },
+            "https://registry.test",
+            "text/plain",
+            None,
+            None,
+            "GLOBAL",
+        );
+        m.suite = crypto::SUITE_HW_P256_V1.to_string();
+        m
     }
 
     #[test]
@@ -435,6 +616,98 @@ mod tests {
         // Just a magic byte, nothing else
         let blob = MAGIC.to_vec();
         assert!(SealedFile::from_bytes(&blob).is_err());
+    }
+
+    #[test]
+    fn seal_open_with_provider_classic_round_trip() {
+        // open_sealed_with_provider must accept a FileKeyProvider against a
+        // legacy classic-suite container and produce identical plaintext to
+        // open_sealed. This is the backward-compat guarantee that lets
+        // callers migrate to the polymorphic open path.
+        let issuer = ClassicIdentity::generate();
+        let recipient = ClassicIdentity::generate();
+        let plaintext = b"classic via provider path";
+        let mut m = make_manifest(&issuer, &recipient, plaintext);
+        let blob = seal(plaintext, &mut m, issuer.ed25519_priv.as_ref(), &recipient.x25519_pub).unwrap();
+
+        let provider = FileKeyProvider::new(recipient);
+        let (pt, manifest) = open_sealed_with_provider(&blob, &provider, None, None).unwrap();
+        assert_eq!(pt, plaintext);
+        assert_eq!(manifest.file_id, m.file_id);
+    }
+
+    #[test]
+    fn seal_hw_p256_open_with_provider_round_trip() {
+        let issuer = ClassicIdentity::generate();
+        let recipient = SoftwareP256Identity::generate();
+        let recipient_pub_sec1 = *recipient.public_key_sec1();
+        let plaintext = b"sealed for a hardware-backed recipient";
+
+        let mut m = make_hw_manifest(&issuer, &recipient_pub_sec1, plaintext);
+        let blob = seal_hw_p256(
+            plaintext,
+            &mut m,
+            issuer.ed25519_priv.as_ref(),
+            &recipient_pub_sec1,
+        )
+        .unwrap();
+
+        // Container header must carry the hardware suite id.
+        assert_eq!(blob[7], SUITE_HW_P256_V1_ID);
+
+        let provider = SoftwareP256KeyProvider::new(recipient);
+        let (pt, manifest) = open_sealed_with_provider(&blob, &provider, None, None).unwrap();
+        assert_eq!(pt, plaintext);
+        assert_eq!(manifest.suite, crypto::SUITE_HW_P256_V1);
+    }
+
+    #[test]
+    fn seal_hw_p256_wrong_recipient_provider_rejected() {
+        let issuer = ClassicIdentity::generate();
+        let alice = SoftwareP256Identity::generate();
+        let alice_pub = *alice.public_key_sec1();
+        let bob = SoftwareP256Identity::generate();
+        let plaintext = b"for alice only";
+
+        let mut m = make_hw_manifest(&issuer, &alice_pub, plaintext);
+        let blob = seal_hw_p256(plaintext, &mut m, issuer.ed25519_priv.as_ref(), &alice_pub).unwrap();
+
+        let bob_provider = SoftwareP256KeyProvider::new(bob);
+        assert!(
+            open_sealed_with_provider(&blob, &bob_provider, None, None).is_err(),
+            "Bob's provider must not unwrap a HW envelope addressed to Alice"
+        );
+    }
+
+    #[test]
+    fn open_with_provider_rejects_cross_suite_provider() {
+        // X25519 provider must not be silently accepted for a P-256 envelope.
+        let issuer = ClassicIdentity::generate();
+        let alice_p256 = SoftwareP256Identity::generate();
+        let alice_pub = *alice_p256.public_key_sec1();
+        let plaintext = b"hw envelope";
+
+        let mut m = make_hw_manifest(&issuer, &alice_pub, plaintext);
+        let blob = seal_hw_p256(plaintext, &mut m, issuer.ed25519_priv.as_ref(), &alice_pub).unwrap();
+
+        let wrong_alg = FileKeyProvider::new(ClassicIdentity::generate());
+        let res = open_sealed_with_provider(&blob, &wrong_alg, None, None);
+        assert!(res.is_err(), "X25519 provider must not be accepted for an OSGT-HW-P256-v1 container");
+    }
+
+    #[test]
+    fn seal_hw_p256_rejects_classic_suite_in_manifest() {
+        // If the manifest still says CLASSIC, seal_hw_p256 must refuse rather
+        // than write a header that disagrees with the signed manifest.
+        let issuer = ClassicIdentity::generate();
+        let alice_p256 = SoftwareP256Identity::generate();
+        let alice_pub = *alice_p256.public_key_sec1();
+        let plaintext = b"hw envelope";
+
+        let mut m = make_hw_manifest(&issuer, &alice_pub, plaintext);
+        m.suite = crypto::SUITE_CLASSIC_V1.to_string();
+        let res = seal_hw_p256(plaintext, &mut m, issuer.ed25519_priv.as_ref(), &alice_pub);
+        assert!(res.is_err(), "seal_hw_p256 must require manifest.suite == OSGT-HW-P256-v1");
     }
 
     #[test]
@@ -534,6 +807,7 @@ mod tests {
                 recipient_id: "cohort".into(),
                 x25519_pub: hex::encode(alice.x25519_pub), // placeholder
                 ed25519_pub: None,
+                p256_pub: None,
             },
             "https://registry.test",
             "text/plain",

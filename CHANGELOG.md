@@ -1,5 +1,22 @@
 # Oversight CHANGELOG
 
+## Unreleased
+
+- **`oversight-container`: end-to-end seal/open for `OSGT-HW-P256-v1`
+  (2026-05-07).** New `seal_hw_p256` mirrors `seal` but consumes a P-256
+  SEC1 uncompressed recipient public key and writes a container with
+  `suite_id = 3`. New `open_sealed_with_provider` is the polymorphic
+  open path: dispatches on the container's `suite_id` and delegates the
+  recipient-side ECDH to a `KeyProvider`. Today it supports classic (with
+  `FileKeyProvider`) and HW P-256 (with `SoftwareP256KeyProvider` or any
+  future `PivKeyProvider`); a hybrid-aware provider extension lands later.
+  Cross-suite mismatches (e.g. an X25519 provider on a HW P-256 container)
+  are refused explicitly. `oversight-manifest::Recipient` gains an
+  optional `p256_pub: Option<String>` field, gated by `serde(default,
+  skip_serializing_if = "Option::is_none")` so existing JSON manifests
+  parse unchanged. Five new round-trip / negative tests; `oversight-
+  container` now 17/17, workspace builds clean.
+
 ## v0.4.10 - 2026-05-07 Hardware-keys foundation: KeyProvider trait + OSGT-HW-P256-v1
 
 This release lands the abstraction and pure-Rust reference path that the
