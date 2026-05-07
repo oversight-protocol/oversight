@@ -131,7 +131,9 @@
     <ul>
       <li>Hybrid (post-quantum) decrypt in the browser. ML-KEM-768 decapsulation alongside X25519; candidate path is a wasm build of <code>liboqs</code>.</li>
       <li>Outlook add-in. First ecosystem integration; the inspector already covers the open path.</li>
-      <li>Hardware <code>KeyProvider</code> integration in Rust (YubiKey, Nitrokey, OnlyKey) with <code>docs/HARDWARE_KEYS.md</code> as the vendor-neutral setup guide.</li>
+      <li>Hardware <code>KeyProvider</code> integration in Rust (YubiKey, Nitrokey, OnlyKey) with <code>docs/HARDWARE_KEYS.md</code> as the vendor-neutral setup guide.
+        <span class="badge badge-green">Trait + OSGT-HW-P256-v1 shipped 2026-05-07</span>
+        <span class="badge badge-blue">PivKeyProvider next</span></li>
       <li>Rust Axum registry: integration testing and migration tooling; the conformance harness is the acceptance gate.</li>
       <li>arXiv preprint (~15 pages, <code>cs.CR</code>).</li>
       <li>Threat model document in the repository (companion to <code>docs/security.md</code>).</li>

@@ -245,7 +245,24 @@
     </p>
     <p>
       <span class="badge badge-green">Shipped</span>
-      <strong>v0.4.9</strong> (on <code>main</code>): the browser inspector now decrypts hybrid
+      <strong>v0.4.10</strong> lands the hardware-keys foundation in Rust. <code>oversight-crypto</code>
+      now exposes a <code>KeyProvider</code> trait that abstracts the recipient-side ECDH so a
+      hardware-backed token (YubiKey / Nitrokey / OnlyKey via PIV) can plug into the open path
+      without changing call sites. <code>FileKeyProvider</code> is the X25519 default.
+      The hardware-track suite <code>OSGT-HW-P256-v1</code> is fully implemented in software:
+      <code>wrap_dek_for_recipient_p256</code>, <code>WrappedDekP256</code>, and
+      <code>SoftwareP256KeyProvider</code> (NIST P-256 ECDH via RustCrypto's <code>p256</code>).
+      <code>oversight-container</code> recognizes the new suite id (<code>3</code>) so sealed files
+      for hardware recipients ride the existing 1-byte header dispatch without a layout change.
+      The <code>PivKeyProvider</code> (PKCS#11) implementation is the next bounded follow-up;
+      the trait and software reference let it ship without touching seal-side or container code.
+      Public API is purely additive; v0.4.9 callers are unchanged. Setup guide:
+      <a href="https://github.com/oversight-protocol/oversight/blob/main/docs/HARDWARE_KEYS.md"><code>docs/HARDWARE_KEYS.md</code></a>.
+      Release notes: <a href="https://github.com/oversight-protocol/oversight/releases/tag/v0.4.10">v0.4.10 on GitHub</a>.
+    </p>
+    <p>
+      <span class="badge badge-green">Shipped</span>
+      <strong>v0.4.9</strong>: the browser inspector now decrypts hybrid
       (post-quantum) sealed files end-to-end, alongside the classic suite that already worked.
       ML-KEM-768 lands via a vendored copy of <code>@noble/post-quantum</code>; X25519 and
       HKDF-SHA256 stay on WebCrypto; XChaCha20-Poly1305 stays on the vendored
