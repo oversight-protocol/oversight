@@ -9,7 +9,7 @@
 //! ------  --------  ---------------------------------------
 //! 0       6         magic: b"OSGT\x01\x00"
 //! 6       1         format_version (=1)
-//! 7       1         suite_id (1=CLASSIC_V1, 2=HYBRID_V1)
+//! 7       1         suite_id (1=CLASSIC_V1, 2=HYBRID_V1, 3=HW_P256_V1)
 //! 8       4         manifest_len (u32 BE)
 //! 12      M         manifest (canonical JSON, signed)
 //! 12+M    4         wrapped_dek_len (u32 BE)
@@ -27,6 +27,9 @@ use thiserror::Error;
 pub const MAGIC: [u8; 6] = *b"OSGT\x01\x00";
 pub const SUITE_CLASSIC_V1_ID: u8 = 1;
 pub const SUITE_HYBRID_V1_ID: u8 = 2;
+/// Hardware-backed P-256 ECDH suite for PIV-compatible tokens.
+/// See `docs/HARDWARE_KEYS.md` and `oversight_crypto::SUITE_HW_P256_V1`.
+pub const SUITE_HW_P256_V1_ID: u8 = 3;
 
 // Hard caps to prevent DoS via attacker-controlled length fields.
 pub const MAX_MANIFEST_BYTES: usize = 4 * 1024 * 1024;
@@ -85,6 +88,7 @@ fn suite_id_for_manifest(suite: &str) -> Option<u8> {
     match suite {
         crypto::SUITE_CLASSIC_V1 => Some(SUITE_CLASSIC_V1_ID),
         crypto::SUITE_HYBRID_V1 => Some(SUITE_HYBRID_V1_ID),
+        crypto::SUITE_HW_P256_V1 => Some(SUITE_HW_P256_V1_ID),
         _ => None,
     }
 }
@@ -431,6 +435,17 @@ mod tests {
         // Just a magic byte, nothing else
         let blob = MAGIC.to_vec();
         assert!(SealedFile::from_bytes(&blob).is_err());
+    }
+
+    #[test]
+    fn suite_id_for_manifest_covers_all_known_suites() {
+        // Each manifest suite must map to a unique container header byte;
+        // adding a new suite without updating this match would otherwise
+        // silently shape-shift into an UnsupportedManifestSuite at seal time.
+        assert_eq!(suite_id_for_manifest(crypto::SUITE_CLASSIC_V1), Some(SUITE_CLASSIC_V1_ID));
+        assert_eq!(suite_id_for_manifest(crypto::SUITE_HYBRID_V1), Some(SUITE_HYBRID_V1_ID));
+        assert_eq!(suite_id_for_manifest(crypto::SUITE_HW_P256_V1), Some(SUITE_HW_P256_V1_ID));
+        assert_eq!(suite_id_for_manifest("OSGT-UNKNOWN"), None);
     }
 
     #[test]

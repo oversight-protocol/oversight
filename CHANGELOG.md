@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- **`oversight-container`: `OSGT-HW-P256-v1` recognized by the binary
+  container (2026-05-07).** Added `SUITE_HW_P256_V1_ID = 3` and extended
+  `suite_id_for_manifest` to map the new manifest suite. This is the bridge
+  that lets a future `seal_hw_p256` ride the existing container layout
+  without reinventing it. New unit test covers the full mapping and asserts
+  unknown suites still return `None`. 12/12 container tests; workspace
+  build clean.
+
 - **`oversight-crypto`: `OSGT-HW-P256-v1` suite implementation (2026-05-07).**
   P-256 ECDH wrap/unwrap landed alongside the X25519 path so hardware-backed
   recipients (YubiKey / Nitrokey / OnlyKey via PIV) have a complete pure-Rust
