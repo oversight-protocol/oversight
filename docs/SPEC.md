@@ -152,7 +152,7 @@ offset  length    field              notes
 8       4         manifest_len       length of manifest JSON in bytes
 12      M         manifest           canonical JSON (signed)
 12+M    4         wrapped_dek_len
-...     W         wrapped_dek        JSON: {ephemeral_pub, nonce, wrapped_dek}
+...     W         wrapped_dek        JSON; per-suite shape (see 5.2)
 ...     24        aead_nonce         XChaCha20-Poly1305 nonce
 ...     4         ciphertext_len
 ...     C         ciphertext         AEAD output, includes 16-byte tag
@@ -161,6 +161,64 @@ offset  length    field              notes
 Implementations MUST reject any `.sealed` file whose unsigned `suite_id`
 header does not match the signed `manifest.suite` value, and MUST reject
 trailing bytes after the declared ciphertext region.
+
+### 5.2 `wrapped_dek` JSON shape per suite
+
+The `wrapped_dek` byte range holds a canonical-JSON object whose fields
+depend on the manifest's declared `suite`. All byte values are lowercase
+hex unless otherwise noted.
+
+#### `OSGT-CLASSIC-v1`
+
+```json
+{
+  "ephemeral_pub": "<32-byte X25519 ephemeral public key>",
+  "nonce":         "<24-byte XChaCha20-Poly1305 nonce>",
+  "wrapped_dek":   "<DEK ciphertext + 16-byte tag>"
+}
+```
+
+KDF: `HKDF-SHA256(salt=None, ikm=ss_x, info="oversight-v1-dek-wrap", L=32)`.
+AAD on `wrapped_dek`: `"oversight-dek"`.
+
+#### `OSGT-HYBRID-v1`
+
+```json
+{
+  "suite":                "OSGT-HYBRID-v1",
+  "x25519_ephemeral_pub": "<32-byte X25519 ephemeral public key>",
+  "mlkem_ciphertext":     "<1088-byte ML-KEM-768 ciphertext>",
+  "nonce":                "<24-byte XChaCha20-Poly1305 nonce>",
+  "wrapped_dek":          "<DEK ciphertext + 16-byte tag>"
+}
+```
+
+KDF: `HKDF-SHA256(salt=None, ikm=ss_x || ss_pq || x25519_eph_pub || mlkem_ct,
+info="oversight-hybrid-v1-dek-wrap", L=32)`. AAD on `wrapped_dek`:
+`"oversight-hybrid-dek"`. The X-wing-style binding over both shared
+secrets and both ephemeral inputs prevents any future construction in
+which an attacker could substitute a valid-but-different ciphertext.
+
+#### `OSGT-HW-P256-v1`
+
+```json
+{
+  "suite":         "OSGT-HW-P256-v1",
+  "ephemeral_pub": "<65-byte SEC1 uncompressed P-256 ephemeral public key>",
+  "nonce":         "<24-byte XChaCha20-Poly1305 nonce>",
+  "wrapped_dek":   "<DEK ciphertext + 16-byte tag>"
+}
+```
+
+KDF: `HKDF-SHA256(salt=None, ikm=ss_p256, info="oversight-hw-p256-v1-dek-wrap",
+L=32)`. AAD on `wrapped_dek`: `"oversight-hw-p256-dek"`.
+
+A polymorphic open implementation MUST dispatch on the unsigned
+`suite_id` header (after the manifest-suite consistency check), parse
+the corresponding shape, and reject any envelope whose ephemeral public
+key length does not match the suite's curve. Mixing keys across suites
+is a misuse and MUST be rejected rather than silently produce a derived
+shared secret.
 
 ### 5.2 Manifest
 
