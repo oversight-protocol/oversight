@@ -110,7 +110,7 @@ The attribute command runs a 5-phase pipeline:
 4. **Multi-layer Bayesian fusion** combining all evidence into ranked candidates
 5. **Content fingerprint comparison** (winnowing + sentence hashing) as a last resort when all watermarks are stripped
 
-## Coming in v0.4.9 (unreleased; on `main`)
+## What's new in v0.4.9
 
 **Browser inspector decrypts hybrid (post-quantum) sealed files.**
 The viewer at <https://oversightprotocol.dev/viewer/> now decrypts

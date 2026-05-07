@@ -1,6 +1,11 @@
 # Oversight CHANGELOG
 
-## Unreleased
+## v0.4.9 - 2026-05-07 Hybrid browser decrypt, Rust registry v1, Outlook scaffold
+
+The browser inspector now decrypts post-quantum sealed files end-to-end,
+the Rust registry passes the v1 conformance harness 33/33, and a thin
+Outlook task-pane scaffold lets us start a tenant pilot. Format watermark
+regressions in `oversight-rust/oversight-formats` are also resolved.
 
 - **Outlook add-in scaffold landed (2026-05-07).** New `integrations/outlook/`
   with the Office add-in 1.1 manifest (`MailApp`, read-mode task pane,

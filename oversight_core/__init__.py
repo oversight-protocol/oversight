@@ -31,4 +31,4 @@ __all__ = [
     "l3_policy",
 ]
 
-__version__ = "0.4.8"
+__version__ = "0.4.9"
