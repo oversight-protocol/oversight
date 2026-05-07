@@ -1,0 +1,261 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>v0.4.10: A Trait for Hardware Keys, and Why P-256 | Oversight Protocol</title>
+  <meta name="description" content="Why Oversight v0.4.10 lands a KeyProvider trait and the OSGT-HW-P256-v1 suite before the actual PKCS#11 binding, and the curve choice that keeps PIV deployments compatible.">
+  <meta name="author" content="Zion Boggan">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="../css/style.css">
+</head>
+<body>
+
+<nav class="site-nav">
+  <div class="nav-inner">
+    <a href="../" class="nav-brand"><span>Oversight</span> Protocol</a>
+    <ul class="nav-links">
+      <li><a href="../">Home</a></li>
+      <li><a href="../demo/">Demo</a></li>
+      <li><a href="../viewer/">Inspect</a></li>
+      <li><a href="../docs/">Docs</a></li>
+      <li><a href="../research/">Research</a></li>
+      <li><a href="../blog/" class="active">Blog</a></li>
+      <li><a href="../about.html">About</a></li>
+    </ul>
+  </div>
+</nav>
+
+<main>
+  <div class="container">
+
+    <div class="blog-post-header">
+      <h1>v0.4.10: A Trait for Hardware Keys, and Why P-256</h1>
+      <div class="blog-post-meta">2026-05-07 &middot; Zion Boggan &middot; ~7 min read</div>
+    </div>
+
+    <div class="blog-content">
+
+      <p>
+        Most of v0.4.10 is one Rust trait and a software reference. There is
+        no PKCS#11 binding in this release. There is no YubiKey-aware CLI
+        flag. There is no signed announcement in an admin tenant somewhere
+        saying "your Oversight messages are now hardware-backed." What this
+        release does is shape the seam that all of those things bolt onto,
+        and it ships a working implementation of the curve they will use, so
+        that the eventual PKCS#11 work is the only piece that has to deal
+        with the hardware.
+      </p>
+
+      <p>
+        That sequencing was deliberate. PKCS#11 is heavy in three different
+        ways at once: the binding itself (vendor differences, slot
+        management, PIN UX), the test harness (softhsm or a token plugged
+        in), and the curve plumbing (P-256 has different wire shapes than
+        X25519). I wanted to land the curve plumbing while it was the only
+        moving piece. Then PivKeyProvider becomes another KeyProvider
+        implementation, plugged into a trait that already has a passing
+        software reference, with no remaining doubt about the protocol-level
+        constructions.
+      </p>
+
+      <h2>The trait</h2>
+
+      <p>
+        The recipient side of an Oversight open is small. Given the wrapped
+        DEK envelope from the sealed file, the recipient does an ECDH
+        against the sender's ephemeral public key, runs HKDF over the shared
+        secret, and AEAD-decrypts the wrapped DEK. From there the outer
+        ciphertext is symmetric. The only step that touches the recipient's
+        long-lived private key is the ECDH.
+      </p>
+
+      <p>
+        That is the seam:
+      </p>
+
+      <pre><code>pub trait KeyProvider {
+    fn algorithm(&amp;self) -&gt; KeyAlgorithm;
+    fn public_key(&amp;self) -&gt; &amp;[u8];
+    fn ecdh(&amp;self, peer_pub: &amp;[u8]) -&gt; Result&lt;Zeroizing&lt;Vec&lt;u8&gt;&gt;, CryptoError&gt;;
+    fn label(&amp;self) -&gt; Option&lt;&amp;str&gt; { None }
+}</code></pre>
+
+      <p>
+        Hold on the size of this. The trait is four methods, three of them
+        small. <code>ecdh</code> is the only operation a hardware token has
+        to perform. Everything else, the HKDF, the AEAD, the canonical
+        manifest verification, the policy enforcement, the content-hash
+        check, all of it stays on the host. The token does one curve
+        operation per open. That is the right division of labor: a PIV
+        token's job is to hold a private scalar and never let it leave, and
+        an Oversight host's job is to do the canonical-bytes work that the
+        protocol depends on. Mixing those would be misuse.
+      </p>
+
+      <p>
+        <code>FileKeyProvider</code> ships as the default. It wraps the
+        existing <code>ClassicIdentity</code> (X25519, the same one
+        Oversight has been using since v0.3) and is byte-identical to the
+        existing <code>unwrap_dek</code> path on file-backed keys, asserted
+        by a test that runs both side by side and compares output. That is
+        the migration guarantee for callers: opt into the trait whenever
+        you want, and your decrypts do not change.
+      </p>
+
+      <h2>The suite: <code>OSGT-HW-P256-v1</code></h2>
+
+      <p>
+        The default Oversight suite uses X25519, which is the right call
+        for a software pipeline. X25519 is fast, the wire format is a
+        32-byte raw pubkey, and the implementations in
+        <code>x25519-dalek</code> have been independently audited.
+      </p>
+
+      <p>
+        PIV slots are not X25519. PIV, the standard most enterprise hardware
+        tokens implement (NIST SP 800-73), supports P-256 and P-384, and
+        nothing else for ECDH. YubiKey 5.7+ added Curve25519 in firmware
+        but only via the OpenPGP applet, not through PIV's PKCS#11 path.
+        Nitrokey and OnlyKey are PIV-shaped and have similar constraints.
+        If we want a single hardware-keys story that works on the
+        broadest set of PIV deployments, the suite has to be on a curve
+        the PIV applet supports.
+      </p>
+
+      <p>
+        So the new suite is <code>OSGT-HW-P256-v1</code>: NIST P-256 ECDH,
+        SEC1 uncompressed (65 byte) public keys on the wire, the same
+        XChaCha20-Poly1305 AEAD as classic, and HKDF info string
+        <code>"oversight-hw-p256-v1-dek-wrap"</code>. Cryptographic
+        strength is unchanged. P-256 is FIPS 140-3 compliant, has been
+        deployed in TLS 1.2 and 1.3 for over a decade, and has survived
+        considerably more scrutiny than any post-quantum primitive will
+        for a while yet. P-256 was not chosen because it is better; it
+        was chosen because PIV runs on it. Crypto-agility was the
+        feature that kept the option open.
+      </p>
+
+      <h2>The software reference</h2>
+
+      <p>
+        <code>SoftwareP256KeyProvider</code> sits next to
+        <code>FileKeyProvider</code> as another implementation of the same
+        trait. Internally it holds a P-256 scalar in process memory the
+        way the file-backed provider holds an X25519 scalar. It exists for
+        two reasons: to give the test suite a way to round-trip the new
+        suite without a token plugged in, and to give recipients without
+        a hardware token a fallback that produces interoperable
+        <code>OSGT-HW-P256-v1</code> envelopes. A token holder and a
+        software-only holder of the same recipient identifier will both
+        decrypt the same file, because the only thing
+        <code>PivKeyProvider</code> changes is where the ECDH runs.
+      </p>
+
+      <p>
+        That symmetry matters. It means a regulated-industry deployment
+        can roll out the suite in software, get the operational story
+        right (revocation, key rotation, audit trail), and then issue
+        hardware tokens to recipients later without rewriting the seal
+        path or the manifest schema. The hardware is an upgrade to the
+        runtime, not a fork of the protocol.
+      </p>
+
+      <h2>End to end on <code>main</code></h2>
+
+      <p>
+        Two follow-up commits past the v0.4.10 tag wire the suite through
+        <code>oversight-container</code> so that
+        <code>OSGT-HW-P256-v1</code> sealed files can actually be created
+        and opened today. <code>seal_hw_p256</code> is the seal-side
+        counterpart: it consumes a SEC1 P-256 recipient public key,
+        cross-checks the manifest's <code>recipient.p256_pub</code>
+        field, generates an ephemeral P-256 keypair, runs ECDH, and packs
+        a container with <code>suite_id = 3</code>.
+        <code>open_sealed_with_provider</code> dispatches on the
+        container's <code>suite_id</code> and delegates ECDH to a
+        <code>&amp;dyn KeyProvider</code>; today it accepts the classic
+        and HW P-256 suites, and rejects cross-suite pairings explicitly
+        rather than silently producing garbage shared secrets.
+      </p>
+
+      <p>
+        The manifest schema gained an optional <code>p256_pub</code>
+        field on <code>Recipient</code>. It is gated by
+        <code>serde(default, skip_serializing_if = "Option::is_none")</code>
+        so existing sealed-file manifests deserialize unchanged. A classic
+        recipient never serializes a <code>p256_pub</code>; a hardware
+        recipient leaves <code>x25519_pub</code> empty and populates
+        <code>p256_pub</code> instead. The container's existing rule that
+        the unsigned <code>suite_id</code> header must match the signed
+        <code>manifest.suite</code> takes care of any cross-pollination
+        attacks for free.
+      </p>
+
+      <h2>What is not in v0.4.10</h2>
+
+      <p>
+        <strong><code>PivKeyProvider</code></strong> is the obvious miss.
+        Plugging the existing trait into <code>cryptoki</code> is the next
+        bounded session, and it brings PIN UX and softhsm-based CI with
+        it. Until that lands, hardware-backed Oversight is in the same
+        position the browser hybrid decrypt was in before a sample file
+        existed: the protocol is real, the testing path is software-only.
+      </p>
+
+      <p>
+        <strong>CLI plumbing</strong> for hardware recipients is also
+        absent. No <code>oversight seal --recipient-hw</code>, no
+        <code>oversight open --recipient-hw piv:9d</code>. Those land
+        once the underlying <code>PivKeyProvider</code> is in place and
+        I can be sure the CLI is asking the token to do something it
+        actually supports on the user's device.
+      </p>
+
+      <p>
+        <strong>Python parity</strong> for the new suite is open. The
+        Python reference implementation is the protocol's source of
+        truth, and right now it knows about classic and hybrid but not
+        about <code>OSGT-HW-P256-v1</code>. The next conformance
+        addition will bring the Python side up to the Rust side so the
+        cross-language tests catch any drift.
+      </p>
+
+      <h2>What I want from this release</h2>
+
+      <p>
+        I want a regulated-industry reviewer to read the
+        <a href="https://github.com/oversight-protocol/oversight/blob/main/docs/HARDWARE_KEYS.md">hardware-keys
+        guide</a> and the <a href="../docs/spec/registry-v1.md">spec</a>,
+        run the same crate test suite I run, and say two things: the seam
+        is in the right place, and the curve choice is honest. The PKCS#11
+        binding is mechanical work. Getting the protocol shape wrong is
+        not.
+      </p>
+
+      <p>
+        Public API is purely additive. Every existing v0.4.9 caller
+        continues to compile and behave the same. The
+        <code>oversight-crypto</code> crate now passes 21 of 21 unit
+        tests; <code>oversight-container</code> passes 17 of 17 with the
+        seal-side additions; the workspace builds clean. The release is
+        small in lines of code and large in the doors it opens.
+      </p>
+
+    </div>
+  </div>
+</main>
+
+<footer class="site-footer">
+  <div class="container">
+    <p>Oversight Protocol &copy; 2026 Zion Boggan. Apache 2.0 License.</p>
+    <p style="color:var(--text-muted);font-size:13px;">Co-authored with Claude Opus 4.6 and 4.7 (Anthropic).</p>
+    <p><a href="https://github.com/oversight-protocol/oversight">GitHub</a></p>
+  </div>
+</footer>
+
+<script src="../js/nav.js" defer></script>
+</body>
+</html>

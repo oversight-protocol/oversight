@@ -1,0 +1,337 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Hardware Keys Guide | Oversight Protocol</title>
+  <meta name="description" content="Vendor-neutral guide for storing Oversight recipient private keys on hardware tokens (YubiKey, Nitrokey, OnlyKey) via PIV. Covers setup, the OSGT-HW-P256-v1 suite, the curve choice, threat model, revocation, and a deployment checklist.">
+  <meta name="author" content="Zion Boggan">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="../css/style.css">
+</head>
+<body>
+
+<nav class="site-nav">
+  <div class="nav-inner">
+    <a href="../" class="nav-brand"><span>Oversight</span> Protocol</a>
+    <ul class="nav-links">
+      <li><a href="../">Home</a></li>
+      <li><a href="../demo/">Demo</a></li>
+      <li><a href="../viewer/">Inspect</a></li>
+      <li><a href="../docs/" class="active">Docs</a></li>
+      <li><a href="../research/">Research</a></li>
+      <li><a href="../blog/">Blog</a></li>
+      <li><a href="../about.html">About</a></li>
+    </ul>
+  </div>
+</nav>
+
+<main>
+  <div class="container">
+
+    <div class="page-header">
+      <h1>Hardware Keys Guide</h1>
+      <p class="subtitle">Storing Oversight recipient keys on PIV-compatible hardware tokens</p>
+    </div>
+
+    <p style="color:var(--text-secondary);font-size:14px;margin:16px 0 24px;">
+      Vendor-neutral guide for storing Oversight recipient private keys on a hardware
+      device (YubiKey, OnlyKey, Nitrokey) rather than a disk file. The canonical
+      source is
+      <a href="https://github.com/oversight-protocol/oversight/blob/main/docs/HARDWARE_KEYS.md"><code>docs/HARDWARE_KEYS.md</code></a>;
+      this page mirrors it for readability and adds an implementation-status
+      footnote so visitors know what is shipped versus what is documented as
+      forward design.
+    </p>
+
+    <div class="info-box" style="background:rgba(64,128,255,0.06);border:1px solid rgba(64,128,255,0.25);border-radius:6px;padding:12px 16px;margin:0 0 24px;font-size:14px;">
+      <strong>Implementation status (2026-05-07).</strong>
+      As of v0.4.10 the <code>KeyProvider</code> trait and the
+      <code>OSGT-HW-P256-v1</code> suite are implemented end-to-end in
+      <code>oversight-rust/oversight-crypto</code>, with a software reference
+      provider (<code>SoftwareP256KeyProvider</code>) so the new suite can be
+      seal/open round-tripped today. The <code>oversight-container</code>
+      crate recognizes <code>suite_id = 3</code> and ships
+      <code>seal_hw_p256</code> + <code>open_sealed_with_provider</code>.
+      The <code>PivKeyProvider</code> (PKCS#11 binding) and the
+      <code>oversight</code> CLI flags described below are the next bounded
+      follow-up; until they ship, hardware-backed Oversight is real at the
+      protocol layer but is software-tested rather than token-tested. See the
+      <a href="../blog/v0.4.10-hardware-keys-foundation.html">v0.4.10 release post</a>
+      for the design rationale.
+    </div>
+
+    <h2 id="why">Why</h2>
+    <p>
+      When a recipient's <code>.key</code> file lives on disk, full compromise
+      of that recipient's laptop gives an attacker the private key forever.
+      That attacker can decrypt every sealed file addressed to that recipient,
+      past and future, with no way to tell the issuer it happened.
+    </p>
+    <p>
+      A hardware-backed key eliminates this. The private key is generated
+      inside the device's secure element and never leaves it. All ECDH (P-256)
+      and signing (Ed25519) operations happen on-device. The host OS gets ECDH
+      outputs, never the raw key. To decrypt, an adversary needs physical
+      possession of the device and typically a touch, PIN, or biometric.
+    </p>
+    <p>
+      This does not give you enclave-grade guarantees. A compromised client
+      running while the YubiKey is plugged in can still open files via the
+      device. What it does give you:
+    </p>
+    <ul>
+      <li><strong>Vendor-neutral.</strong> Any FIDO2 / PIV device works.</li>
+      <li><strong>Theft is discrete.</strong> Physical device loss is noticeable; disk theft may not be.</li>
+      <li><strong>Revocation is simple.</strong> Deauthorize the device's pubkey in the registry.</li>
+      <li><strong>Works offline.</strong> No cloud service.</li>
+      <li><strong>No recurring cost.</strong> $50&ndash;$80 once.</li>
+    </ul>
+
+    <h2 id="devices">Supported devices</h2>
+    <p>
+      Any device exposing <strong>PIV</strong> (Personal Identity Verification,
+      PKCS#11-compatible) slots works. Tested:
+    </p>
+    <table class="kv-table" style="width:100%;border-collapse:collapse;font-size:14px;">
+      <thead>
+        <tr>
+          <th style="text-align:left;padding:8px 12px;border-bottom:1px solid var(--border);color:var(--text-muted);">Device</th>
+          <th style="text-align:left;padding:8px 12px;border-bottom:1px solid var(--border);color:var(--text-muted);">Cost (USD)</th>
+          <th style="text-align:left;padding:8px 12px;border-bottom:1px solid var(--border);color:var(--text-muted);">PIV slots</th>
+          <th style="text-align:left;padding:8px 12px;border-bottom:1px solid var(--border);color:var(--text-muted);">Notes</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr><td style="padding:8px 12px;border-bottom:1px solid var(--border);">YubiKey 5C NFC</td><td style="padding:8px 12px;border-bottom:1px solid var(--border);">~$75</td><td style="padding:8px 12px;border-bottom:1px solid var(--border);">yes</td><td style="padding:8px 12px;border-bottom:1px solid var(--border);">Most tested; widely available</td></tr>
+        <tr><td style="padding:8px 12px;border-bottom:1px solid var(--border);">YubiKey 5 NFC</td><td style="padding:8px 12px;border-bottom:1px solid var(--border);">~$55</td><td style="padding:8px 12px;border-bottom:1px solid var(--border);">yes</td><td style="padding:8px 12px;border-bottom:1px solid var(--border);">USB-A version</td></tr>
+        <tr><td style="padding:8px 12px;border-bottom:1px solid var(--border);">YubiKey Security Key NFC</td><td style="padding:8px 12px;border-bottom:1px solid var(--border);">~$29</td><td style="padding:8px 12px;border-bottom:1px solid var(--border);">FIDO2 only</td><td style="padding:8px 12px;border-bottom:1px solid var(--border);">Cheapest but limited</td></tr>
+        <tr><td style="padding:8px 12px;border-bottom:1px solid var(--border);">Nitrokey 3 NFC</td><td style="padding:8px 12px;border-bottom:1px solid var(--border);">~$80</td><td style="padding:8px 12px;border-bottom:1px solid var(--border);">yes</td><td style="padding:8px 12px;border-bottom:1px solid var(--border);">Fully open-source firmware</td></tr>
+        <tr><td style="padding:8px 12px;">OnlyKey</td><td style="padding:8px 12px;">~$50</td><td style="padding:8px 12px;">yes</td><td style="padding:8px 12px;">Open hardware + firmware</td></tr>
+      </tbody>
+    </table>
+    <p>
+      Recommendation: <strong>YubiKey 5C NFC</strong> for most users (best
+      tooling), <strong>Nitrokey 3</strong> if firmware openness matters more
+      than ecosystem support.
+    </p>
+
+    <h2 id="setup">First-time setup</h2>
+
+    <h3>1. Install the tooling</h3>
+    <pre style="background:var(--bg-secondary);border:1px solid var(--border);border-radius:6px;padding:12px;font-size:13px;overflow-x:auto;"><code># Debian / Ubuntu
+sudo apt install yubikey-manager pcscd opensc
+sudo systemctl enable --now pcscd
+
+# macOS
+brew install yubikey-manager opensc
+
+# Arch
+sudo pacman -S yubikey-manager opensc ccid</code></pre>
+
+    <h3>2. Verify the device is seen</h3>
+    <pre style="background:var(--bg-secondary);border:1px solid var(--border);border-radius:6px;padding:12px;font-size:13px;overflow-x:auto;"><code>ykman info
+# Should print serial, firmware version, and enabled applications.
+
+pkcs11-tool --list-slots --module /usr/lib/x86_64-linux-gnu/opensc-pkcs11.so
+# Should list the YubiKey as slot 0.</code></pre>
+
+    <h3>3. Set a PIN and management key</h3>
+    <p><strong>Do not skip this.</strong> The factory defaults (PIN 123456, PUK 12345678) are publicly known. Change both now.</p>
+    <pre style="background:var(--bg-secondary);border:1px solid var(--border);border-radius:6px;padding:12px;font-size:13px;overflow-x:auto;"><code># PIV PIN (6-8 digits)
+ykman piv access change-pin
+
+# PIV PUK (used to unblock if you lock yourself out)
+ykman piv access change-puk
+
+# Management key (used for admin ops; 24-byte hex)
+ykman piv access change-management-key --generate --protect
+# --protect stashes the new key in PIV slot so you don't need to manage it</code></pre>
+
+    <h3>4. Generate an Oversight recipient key on-device</h3>
+    <p>
+      PIV has four main slots. Use <strong>slot 9d (Key Management)</strong>
+      for Oversight. It is meant for decryption operations and does not require
+      a PIN on every use (only first use per session, via cached auth).
+    </p>
+    <pre style="background:var(--bg-secondary);border:1px solid var(--border);border-radius:6px;padding:12px;font-size:13px;overflow-x:auto;"><code># Generate an ECC P-256 key in slot 9d
+ykman piv keys generate 9d --algorithm ECCP256 -
+# Note: P-256, not Curve25519. See "Curve choice" below.
+
+# Self-sign a cert so PIV treats the slot as initialized
+ykman piv certificates generate 9d \
+    --subject "CN=oversight-recipient" \
+    --valid-days 3650 -</code></pre>
+
+    <h3>5. Export the public key in Oversight format</h3>
+    <p>
+      Oversight identities are JSON. We need to convert the PIV slot's public
+      key to the format Oversight uses.
+    </p>
+    <pre style="background:var(--bg-secondary);border:1px solid var(--border);border-radius:6px;padding:12px;font-size:13px;overflow-x:auto;"><code># Export the cert, extract the pubkey
+ykman piv certificates export 9d - | \
+    openssl x509 -pubkey -noout -in - | \
+    openssl ec -pubin -text -noout</code></pre>
+    <p>
+      Write the resulting pubkey hex into an Oversight identity file with a
+      <code>hardware: true</code> marker:
+    </p>
+    <pre style="background:var(--bg-secondary);border:1px solid var(--border);border-radius:6px;padding:12px;font-size:13px;overflow-x:auto;"><code>{
+  "hardware": true,
+  "provider": "piv",
+  "piv_slot": "9d",
+  "p256_pub": "&lt;hex of SEC1 uncompressed P-256 pubkey, 65 bytes&gt;",
+  "ed25519_pub": null,
+  "device_serial": "&lt;yubikey-serial&gt;"
+}</code></pre>
+    <p>
+      The <code>p256_pub</code> field corresponds to
+      <code>Recipient.p256_pub</code> in the manifest schema (see
+      <a href="https://github.com/oversight-protocol/oversight/blob/main/docs/SPEC.md#413-osgt-hw-p256-v1-suite_id--3"><code>SPEC.md</code> &sect; 4.1.3</a>).
+      A hardware recipient leaves <code>x25519_pub</code> empty in the manifest;
+      classic recipients leave <code>p256_pub</code> absent.
+    </p>
+
+    <h2 id="curve">Curve choice: why P-256 for hardware-backed recipients</h2>
+    <p>
+      The default Oversight suite uses X25519 for key agreement. PIV-compatible
+      hardware devices historically only supported P-256 and P-384 for PIV
+      slots. YubiKey 5.7+ firmware does support Curve25519 via a dedicated
+      OpenPGP applet, but PIV itself does not.
+    </p>
+    <p>
+      To stay compatible with the broadest set of devices (Nitrokey, OnlyKey,
+      older YubiKeys), Oversight uses <strong>P-256 ECDH</strong> for
+      hardware-backed recipients. The suite identifier in the manifest becomes
+      <code>OSGT-HW-P256-v1</code> instead of <code>OSGT-CLASSIC-v1</code>.
+      The crypto is just as strong: P-256 ECDH is NIST-standardized,
+      FIPS 140-3 compliant, and battle-tested.
+    </p>
+    <p>
+      Open clients that want to decrypt for hardware-backed recipients must
+      support both suites. The default file-backed provider stays on X25519.
+    </p>
+
+    <h2 id="open-cli">Opening a sealed file with a hardware-backed key (CLI)</h2>
+    <pre style="background:var(--bg-secondary);border:1px solid var(--border);border-radius:6px;padding:12px;font-size:13px;overflow-x:auto;"><code># Insert YubiKey. You may be prompted for PIN.
+oversight open --input secret.sealed --output secret.txt \
+    --recipient-hw piv:9d
+
+# First op prompts for PIN; subsequent ops within the session don't.</code></pre>
+    <p>
+      Under the hood, this calls PKCS#11 <code>C_DeriveKey</code> to run ECDH
+      against the on-device private key, then runs the standard Oversight
+      HKDF + AEAD decrypt on the host. The raw private key never leaves the
+      device.
+    </p>
+    <p style="color:var(--text-muted);font-size:13px;">
+      <em>Status:</em> the trait and the protocol-level decrypt path are
+      implemented in <code>oversight-rust/oversight-crypto</code> and
+      <code>oversight-rust/oversight-container</code> as of v0.4.10. The
+      <code>--recipient-hw</code> CLI flag and the underlying
+      <code>PivKeyProvider</code> are the next follow-up.
+    </p>
+
+    <h2 id="revocation">Revocation</h2>
+    <p>If a device is lost, stolen, or retired:</p>
+    <ol>
+      <li>POST to the registry:
+        <pre style="background:var(--bg-secondary);border:1px solid var(--border);border-radius:6px;padding:12px;font-size:13px;overflow-x:auto;"><code>POST /recipients/{recipient_id}/revoke
+Authorization: Bearer &lt;issuer_token&gt;
+{"reason": "device_lost", "replaced_by": "&lt;new_pubkey_hex&gt;"}</code></pre>
+      </li>
+      <li>The registry appends a revocation event to the tlog with a qualified
+        RFC 3161 timestamp. Anyone verifying future sealed files addressed to
+        the old pubkey will see the revocation in the event history and reject
+        the file.</li>
+      <li>Issue new sealed files to the recipient's new pubkey.</li>
+    </ol>
+    <p>
+      Note: the revocation does <strong>not</strong> un-seal already-delivered
+      ciphertext. Any file the lost device opened before it was lost is
+      already out. Revocation protects against <em>future</em> misuse of the
+      device.
+    </p>
+
+    <h2 id="threat">Threat model for hardware-backed keys</h2>
+    <h3>What hardware keys defend against</h3>
+    <ul>
+      <li>Recipient laptop fully compromised, attacker has root, keylogger
+        running: attacker cannot exfiltrate the private key. Can only ECDH
+        while the device is plugged in. Discrete events.</li>
+      <li>Recipient's encrypted laptop is stolen while powered off. Attacker
+        brute-forces disk. Gets nothing useful because the PIV key is on the
+        YubiKey.</li>
+      <li>Malware on recipient's machine installs a background decryption job.
+        Hardware-backed means each ECDH requires the device to be plugged in
+        and (optionally) a touch. Attacker cannot do it passively.</li>
+    </ul>
+    <h3>What hardware keys do NOT defend against</h3>
+    <ul>
+      <li>Recipient's laptop compromised <strong>while</strong> the YubiKey is
+        plugged in. Attacker can call PKCS#11 to do ECDH against any file the
+        legitimate client could.
+        <em>Mitigation:</em> require touch-to-decrypt (YubiKey PIV policy
+        <code>always-require</code>).</li>
+      <li>Physical theft of both laptop and YubiKey. Attacker has everything
+        needed.
+        <em>Mitigation:</em> strong PIN; device auto-locks after N wrong
+        PINs.</li>
+      <li>A supply-chain-compromised YubiKey. Vendor-independence is the only
+        mitigation, and is why Oversight supports Nitrokey / OnlyKey
+        alongside.</li>
+    </ul>
+
+    <h2 id="caveats">Known hardware caveats</h2>
+    <ul>
+      <li><strong>PIV key operations count against the device's attempt
+        counter.</strong> YubiKey PIV defaults to 3 attempts before locking.
+        Set a reasonable limit and keep a PUK to recover.</li>
+      <li><strong>Touch policy trade-off.</strong>
+        <code>always-require-touch</code> is more secure but requires user
+        interaction on every open. <code>cached</code> touches (one per
+        session) is the usual compromise.</li>
+      <li><strong>No post-quantum yet.</strong> Current hardware keys do not
+        support ML-KEM / ML-DSA. Hardware-backed recipients are
+        <code>OSGT-HW-P256-v1</code> only for now. For PQ protection, use a
+        file-backed recipient with the hybrid suite, or wait for
+        hardware-native ML-KEM support (YubiKey and Nitrokey have hinted at
+        late-2026 / 2027 firmware).</li>
+    </ul>
+
+    <h2 id="checklist">Checklist before deploying to real recipients</h2>
+    <ul style="list-style:none;padding-left:0;">
+      <li>&#9744; PIN and PUK changed from factory defaults.</li>
+      <li>&#9744; Management key rotated.</li>
+      <li>&#9744; Touch policy decided (always vs cached vs never).</li>
+      <li>&#9744; Device serial recorded in a separate, encrypted inventory.</li>
+      <li>&#9744; Recovery procedure documented (if device lost, who is notified and how).</li>
+      <li>&#9744; Backup strategy: issue each recipient TWO devices (primary + backup), register BOTH pubkeys, seal to both, store backup in a safe.</li>
+      <li>&#9744; Revocation playbook tested end-to-end on a test recipient.</li>
+    </ul>
+
+    <h2 id="reading">Further reading</h2>
+    <ul>
+      <li>YubiKey PIV documentation: <a href="https://developers.yubico.com/PIV/">developers.yubico.com/PIV/</a></li>
+      <li>NIST SP 800-73-4 (PIV Interfaces): <a href="https://csrc.nist.gov/pubs/sp/800/73/4">csrc.nist.gov/pubs/sp/800/73/4</a></li>
+      <li>Nitrokey 3 PIV: <a href="https://docs.nitrokey.com/nitrokey3/">docs.nitrokey.com/nitrokey3</a></li>
+      <li>Oversight protocol spec, &sect; 4.1.3 <code>OSGT-HW-P256-v1</code>: <a href="https://github.com/oversight-protocol/oversight/blob/main/docs/SPEC.md#413-osgt-hw-p256-v1-suite_id--3">SPEC.md</a></li>
+      <li>v0.4.10 release notes: <a href="../blog/v0.4.10-hardware-keys-foundation.html">v0.4.10: A Trait for Hardware Keys, and Why P-256</a></li>
+    </ul>
+
+  </div>
+</main>
+
+<footer class="site-footer">
+  <div class="container">
+    <p>Oversight Protocol &copy; 2026 Zion Boggan. Apache 2.0 License.</p>
+    <p style="color:var(--text-muted);font-size:13px;">Co-authored with Claude Opus 4.6 and 4.7 (Anthropic).</p>
+    <p><a href="https://github.com/oversight-protocol/oversight">GitHub</a></p>
+  </div>
+</footer>
+
+<script src="../js/nav.js" defer></script>
+</body>
+</html>

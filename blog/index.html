@@ -39,6 +39,12 @@
     <ul class="blog-list">
 
       <li class="blog-entry">
+        <div class="blog-date">2026-05-07</div>
+        <h2><a href="v0.4.10-hardware-keys-foundation.html">v0.4.10: A Trait for Hardware Keys, and Why P-256</a></h2>
+        <p class="excerpt">Oversight v0.4.10 lands the seam that hardware-backed keys plug into: a small <code>KeyProvider</code> trait abstracting the recipient-side ECDH, the <code>OSGT-HW-P256-v1</code> suite implemented end-to-end in software, and a polymorphic open path that dispatches by container suite id. Why P-256 instead of X25519 (PIV compatibility, not cryptographic preference), why the curve plumbing landed before the PKCS#11 binding, and what is and is not in this release.</p>
+      </li>
+
+      <li class="blog-entry">
         <div class="blog-date">2026-05-04</div>
         <h2><a href="rust-registry-hybrid-watermark-progress.html">Development Log: Rust Registry v1, Hybrid Viewer Samples, and Watermark Round Trips</a></h2>
         <p class="excerpt">Three stacked Oversight changes move the Rust path forward: the Axum registry now passes the v1 conformance harness, the browser inspector has public hybrid decrypt sample tooling, and Rust format watermark round trips are green after fixes to text layer ordering and image LSB scheduling. What changed, why it matters, and what still is not a v1.0 declaration.</p>
