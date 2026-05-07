@@ -25,10 +25,10 @@ in `manifest.xml` (`SourceLocation`). Production target is
 `https://oversightprotocol.dev/integrations/outlook/`, which lives under
 `gh-pages` next to `viewer/`.
 
-To deploy: copy this directory's contents into `P:\Oversight\site\integrations\outlook\`
-and push `gh-pages` (the standard site deploy step). Same-origin imports of
-`/viewer/viewer.js` and the vendored noble bundles work automatically once
-both paths are on the same host.
+To deploy: copy this directory's contents into the public site tree at
+`integrations/outlook/` and push `gh-pages` (the standard site deploy step).
+Same-origin imports of `/viewer/viewer.js` and the vendored noble bundles work
+automatically once both paths are on the same host.
 
 ## Sideload (developer)
 
