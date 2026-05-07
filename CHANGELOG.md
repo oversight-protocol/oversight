@@ -1,5 +1,18 @@
 # Oversight CHANGELOG
 
+## Unreleased
+
+- **`oversight-crypto`: `KeyProvider` trait + `FileKeyProvider` (2026-05-07).**
+  The recipient-side ECDH path is now abstracted behind `pub trait KeyProvider`,
+  with `FileKeyProvider` shipping as the X25519 file-backed default. New
+  `unwrap_dek_with_provider` is byte-identical to `unwrap_dek` for file-backed
+  keys (asserted by tests) and is the entry point hardware-backed providers
+  (PIV / PKCS#11) will plug into next, per `docs/HARDWARE_KEYS.md`. Public API
+  is purely additive: existing `unwrap_dek(wrapped, priv_bytes)` callers are
+  unchanged. `KeyAlgorithm::P256` reserved for the upcoming `OSGT-HW-P256-v1`
+  suite. Six new unit tests; workspace build clean; `oversight-crypto` passes
+  13/13.
+
 ## v0.4.9 - 2026-05-07 Hybrid browser decrypt, Rust registry v1, Outlook scaffold
 
 The browser inspector now decrypts post-quantum sealed files end-to-end,

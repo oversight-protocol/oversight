@@ -280,6 +280,158 @@ pub fn unwrap_dek(
     Ok(Zeroizing::new(plaintext))
 }
 
+// -------------------------- KeyProvider --------------------------
+
+/// Algorithm a [`KeyProvider`] uses for ECDH.
+///
+/// `X25519` is the default Oversight suite (`OSGT-CLASSIC-v1`).
+/// `P256` is reserved for hardware-backed providers per `docs/HARDWARE_KEYS.md`
+/// (suite `OSGT-HW-P256-v1`); the wrap/unwrap implementations for P256 will
+/// land alongside the first hardware [`KeyProvider`] and are deliberately not
+/// part of this crate yet.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum KeyAlgorithm {
+    X25519,
+    P256,
+}
+
+/// Trait abstracting the recipient-side private-key operations needed to
+/// open an Oversight sealed file. Holders of a hardware token (YubiKey,
+/// Nitrokey, OnlyKey via PIV) can implement this without exposing the raw
+/// private key bytes; the device performs ECDH internally and only the
+/// shared secret crosses the trait boundary.
+///
+/// This trait is intentionally narrow. The wrap (sender) side does not need
+/// it: an Oversight sender only ever holds the recipient's *public* key plus
+/// a fresh ephemeral keypair the sender generates locally. Hardware delegation
+/// is purely an unwrap-side concern.
+///
+/// Implementors must zero any in-memory secret material on drop. The default
+/// [`FileKeyProvider`] delegates to `Zeroizing<[u8; 32]>` for that.
+pub trait KeyProvider {
+    /// The ECDH curve this provider uses.
+    fn algorithm(&self) -> KeyAlgorithm;
+
+    /// The provider's public key, in the curve's standard wire format
+    /// (32 bytes raw for X25519, SEC1 65 bytes uncompressed for P-256).
+    fn public_key(&self) -> &[u8];
+
+    /// Run ECDH against `peer_pub` (typically the wrapped envelope's
+    /// `ephemeral_pub`) and return the resulting shared secret. The shared
+    /// secret is wrapped in `Zeroizing` so it scrubs when dropped.
+    ///
+    /// Errors with [`CryptoError::InvalidKeyLength`] if `peer_pub` is wrong
+    /// for the provider's curve, or with a backend-specific error wrapped
+    /// by the impl.
+    fn ecdh(&self, peer_pub: &[u8]) -> Result<Zeroizing<Vec<u8>>, CryptoError>;
+
+    /// Optional human-readable identifier for diagnostic logging. Hardware
+    /// providers may surface a slot label; file-backed providers may surface
+    /// the recipient_id from the identity JSON.
+    fn label(&self) -> Option<&str> {
+        None
+    }
+}
+
+/// File-backed [`KeyProvider`] that wraps a [`ClassicIdentity`]. This is the
+/// default Oversight provider: X25519 private key sits in process memory,
+/// scrubbed on drop via [`Zeroizing`].
+///
+/// Hardware-backed providers (`PivKeyProvider`, etc.) live in separate
+/// modules / feature-gated crates and implement the same trait so the
+/// open/unwrap call sites do not change when callers swap providers.
+pub struct FileKeyProvider {
+    inner: ClassicIdentity,
+    label: Option<String>,
+}
+
+impl FileKeyProvider {
+    /// Wrap an existing [`ClassicIdentity`] without a label.
+    pub fn new(identity: ClassicIdentity) -> Self {
+        Self { inner: identity, label: None }
+    }
+
+    /// Wrap with a label (e.g., the recipient_id from the identity JSON).
+    pub fn with_label(identity: ClassicIdentity, label: impl Into<String>) -> Self {
+        Self { inner: identity, label: Some(label.into()) }
+    }
+
+    /// Borrow the underlying classic identity. Hardware providers won't be
+    /// able to expose this; callers that depend on it are file-only.
+    pub fn identity(&self) -> &ClassicIdentity {
+        &self.inner
+    }
+}
+
+impl KeyProvider for FileKeyProvider {
+    fn algorithm(&self) -> KeyAlgorithm {
+        KeyAlgorithm::X25519
+    }
+
+    fn public_key(&self) -> &[u8] {
+        &self.inner.x25519_pub
+    }
+
+    fn ecdh(&self, peer_pub: &[u8]) -> Result<Zeroizing<Vec<u8>>, CryptoError> {
+        if peer_pub.len() != X25519_KEY_LEN {
+            return Err(CryptoError::InvalidKeyLength {
+                expected: X25519_KEY_LEN,
+                got: peer_pub.len(),
+            });
+        }
+        let mut peer_arr = [0u8; X25519_KEY_LEN];
+        peer_arr.copy_from_slice(peer_pub);
+        let peer = X25519PublicKey::from(peer_arr);
+
+        let mut sk_bytes = [0u8; X25519_KEY_LEN];
+        sk_bytes.copy_from_slice(self.inner.x25519_priv.as_ref());
+        let sk = X25519StaticSecret::from(sk_bytes);
+        sk_bytes.zeroize();
+
+        let shared = sk.diffie_hellman(&peer).to_bytes();
+        Ok(Zeroizing::new(shared.to_vec()))
+    }
+
+    fn label(&self) -> Option<&str> {
+        self.label.as_deref()
+    }
+}
+
+/// Recipient-side DEK unwrap that delegates the ECDH step to a
+/// [`KeyProvider`]. Behaves identically to [`unwrap_dek`] when the provider
+/// is a [`FileKeyProvider`], and is the entry point hardware-backed providers
+/// will share once they ship.
+pub fn unwrap_dek_with_provider(
+    wrapped: &WrappedDek,
+    provider: &dyn KeyProvider,
+) -> Result<Zeroizing<Vec<u8>>, CryptoError> {
+    if provider.algorithm() != KeyAlgorithm::X25519 {
+        // OSGT-CLASSIC-v1 wrap_dek_for_recipient produces an X25519 ephemeral
+        // pub. Hardware providers on P-256 will need a sibling unwrap path
+        // (OSGT-HW-P256-v1) once that suite ships; until then, refuse rather
+        // than silently produce garbage.
+        return Err(CryptoError::InvalidKeyLength {
+            expected: X25519_KEY_LEN,
+            got: provider.public_key().len(),
+        });
+    }
+
+    let shared = provider.ecdh(&wrapped.ephemeral_pub)?;
+
+    let hk = Hkdf::<Sha256>::new(None, shared.as_ref());
+    let mut kek = Zeroizing::new([0u8; 32]);
+    hk.expand(b"oversight-v1-dek-wrap", kek.as_mut())
+        .map_err(|_| CryptoError::Hkdf)?;
+
+    let plaintext = aead_decrypt(
+        kek.as_ref(),
+        &wrapped.nonce,
+        &wrapped.wrapped_dek,
+        b"oversight-dek",
+    )?;
+    Ok(Zeroizing::new(plaintext))
+}
+
 // -------------------------- Signatures --------------------------
 
 pub fn sign_message(msg: &[u8], ed25519_priv: &[u8]) -> Result<[u8; ED25519_SIG_LEN], CryptoError> {
@@ -390,5 +542,92 @@ mod tests {
         let json = wrapped.to_json_hex();
         let parsed = WrappedDek::from_json_hex(&json).unwrap();
         assert_eq!(wrapped, parsed);
+    }
+
+    #[test]
+    fn file_key_provider_advertises_x25519() {
+        let id = ClassicIdentity::generate();
+        let pub_copy = id.x25519_pub;
+        let provider = FileKeyProvider::new(id);
+        assert_eq!(provider.algorithm(), KeyAlgorithm::X25519);
+        assert_eq!(provider.public_key(), &pub_copy);
+        assert!(provider.label().is_none());
+    }
+
+    #[test]
+    fn file_key_provider_label() {
+        let id = ClassicIdentity::generate();
+        let provider = FileKeyProvider::with_label(id, "tutorial@oversightprotocol.dev");
+        assert_eq!(provider.label(), Some("tutorial@oversightprotocol.dev"));
+    }
+
+    #[test]
+    fn file_key_provider_ecdh_matches_raw() {
+        // The provider's ECDH must produce the same shared secret as a direct
+        // x25519_dalek call against the same key material. Otherwise
+        // unwrap_dek_with_provider would diverge from unwrap_dek.
+        let alice = ClassicIdentity::generate();
+        let bob = ClassicIdentity::generate();
+        let alice_pub_copy = alice.x25519_pub;
+        let mut bob_priv_copy = [0u8; X25519_KEY_LEN];
+        bob_priv_copy.copy_from_slice(bob.x25519_priv.as_ref());
+        let provider = FileKeyProvider::new(bob);
+
+        let via_provider = provider.ecdh(&alice_pub_copy).unwrap();
+
+        // Raw x25519_dalek for comparison.
+        let bob_sk = X25519StaticSecret::from(bob_priv_copy);
+        let raw = bob_sk.diffie_hellman(&X25519PublicKey::from(alice_pub_copy)).to_bytes();
+
+        assert_eq!(via_provider.as_slice(), &raw[..]);
+    }
+
+    #[test]
+    fn file_key_provider_rejects_wrong_peer_length() {
+        let provider = FileKeyProvider::new(ClassicIdentity::generate());
+        let err = provider.ecdh(&[0u8; 31]).unwrap_err();
+        match err {
+            CryptoError::InvalidKeyLength { expected, got } => {
+                assert_eq!(expected, X25519_KEY_LEN);
+                assert_eq!(got, 31);
+            }
+            other => panic!("expected InvalidKeyLength, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn unwrap_dek_with_provider_matches_unwrap_dek() {
+        // The provider path must be byte-identical to the legacy path so we
+        // can migrate call sites incrementally without behavior drift.
+        let alice = ClassicIdentity::generate();
+        let mut alice_priv_copy = [0u8; X25519_KEY_LEN];
+        alice_priv_copy.copy_from_slice(alice.x25519_priv.as_ref());
+        let alice_pub_copy = alice.x25519_pub;
+        let provider = FileKeyProvider::new(alice);
+
+        let dek = random_dek();
+        let wrapped = wrap_dek_for_recipient(dek.as_ref(), &alice_pub_copy).unwrap();
+
+        let via_legacy = unwrap_dek(&wrapped, &alice_priv_copy).unwrap();
+        let via_provider = unwrap_dek_with_provider(&wrapped, &provider).unwrap();
+
+        assert_eq!(&via_legacy[..], dek.as_ref());
+        assert_eq!(&via_provider[..], dek.as_ref());
+        assert_eq!(&via_legacy[..], &via_provider[..]);
+    }
+
+    #[test]
+    fn unwrap_dek_with_provider_wrong_recipient_rejected() {
+        let alice = ClassicIdentity::generate();
+        let bob = ClassicIdentity::generate();
+        let alice_pub_copy = alice.x25519_pub;
+        let provider_bob = FileKeyProvider::new(bob);
+
+        let dek = random_dek();
+        let wrapped = wrap_dek_for_recipient(dek.as_ref(), &alice_pub_copy).unwrap();
+
+        // Bob's provider should fail to recover the DEK.
+        let res = unwrap_dek_with_provider(&wrapped, &provider_bob);
+        assert!(res.is_err(), "Bob's provider must not unwrap a DEK addressed to Alice");
     }
 }

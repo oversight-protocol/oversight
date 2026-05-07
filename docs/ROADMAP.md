@@ -206,9 +206,16 @@ Sealing-from-Outlook (compose mode) is intentionally deferred to v2.
 ### Hardware `KeyProvider` in Rust
 
 `docs/HARDWARE_KEYS.md` already documents the vendor-neutral setup
-covering YubiKey 5C, OnlyKey, and Nitrokey 3. The remaining work is
-the `KeyProvider` trait and two concrete implementations
-(`FileKeyProvider`, `PivKeyProvider`) in `oversight-crypto`. The
+covering YubiKey 5C, OnlyKey, and Nitrokey 3. **Trait + `FileKeyProvider`
+landed 2026-05-07** in `oversight-crypto`: `KeyProvider` abstracts the
+recipient-side ECDH so a hardware backend can plug in without changing
+call sites; `unwrap_dek_with_provider` is the new entry point and is
+byte-identical to `unwrap_dek` for file-backed keys.
+
+The remaining work is the `PivKeyProvider` (PKCS#11 against a YubiKey /
+Nitrokey / OnlyKey PIV slot) and the `OSGT-HW-P256-v1` suite that goes
+with it: P-256 ECDH wire format on the wrap side, manifest suite-id
+plumbing, and the open-side decrypt path that branches on suite. The
 registry records whether each recipient pubkey is file-backed or
 hardware-backed so issuers can require hardware backing for sensitive
 material.
