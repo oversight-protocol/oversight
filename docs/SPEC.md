@@ -97,6 +97,42 @@ hybrid_ss = HKDF-SHA256(
 
 Hybrid signatures attach both signatures to the manifest. Verification requires BOTH to validate.
 
+#### 4.1.3 `OSGT-HW-P256-v1` (suite_id = 3)
+
+For recipients whose private key lives in a PIV-compatible hardware token
+(YubiKey, Nitrokey, OnlyKey). The token performs the ECDH on-device; the
+private scalar never leaves the device.
+
+- Key agreement: ECDH on NIST P-256 (FIPS 186-5 / SEC1)
+- Recipient public key: SEC1 uncompressed encoding (65 bytes,
+  `0x04 || X || Y`); recorded in the manifest as `recipient.p256_pub` (hex)
+- KDF: HKDF-SHA256 (RFC 5869), `salt = None`, `info = "oversight-hw-p256-v1-dek-wrap"`
+- AEAD: XChaCha20-Poly1305, `aad = "oversight-hw-p256-dek"`
+- Signature: Ed25519 (issuer); the recipient's hardware suite does not
+  affect the issuer signature path
+- Hash: SHA-256
+
+The `wrapped_dek` JSON for this suite is:
+
+```json
+{
+  "suite": "OSGT-HW-P256-v1",
+  "ephemeral_pub": "<hex of SEC1 uncompressed P-256 ephemeral pubkey, 65 bytes>",
+  "nonce": "<hex, 24 bytes>",
+  "wrapped_dek": "<hex, AEAD ciphertext including 16-byte tag>"
+}
+```
+
+The sender holds no hardware key. The ephemeral keypair is generated locally
+in software; only the recipient's public key needs to come off the token
+(typically via PKCS#11 `C_GetAttributeValue` once at recipient enrollment).
+
+P-256 was chosen over X25519 for compatibility with the broadest set of PIV
+deployments. PIV slots historically support only P-256 and P-384; YubiKey
+5.7+ adds Curve25519 over the OpenPGP applet but PIV itself does not.
+Cryptographic strength is unchanged; both X25519 and P-256 ECDH offer
+~128-bit security.
+
 ### 4.2 Custom cryptography is PROHIBITED
 
 Implementations MUST NOT introduce new cryptographic primitives. The suite identifiers are reserved; new suites may only be added via specification update after independent review.
@@ -112,7 +148,7 @@ offset  length    field              notes
 ------  --------  -----------------  ---------------------------------
 0       6         magic              0x53 0x4E 0x54 0x4C 0x01 0x00  ("OSGT\x01\x00")
 6       1         format_version     MUST be 0x01
-7       1         suite_id           1 = CLASSIC_v1, 2 = HYBRID_v1
+7       1         suite_id           1 = CLASSIC_v1, 2 = HYBRID_v1, 3 = HW_P256_v1
 8       4         manifest_len       length of manifest JSON in bytes
 12      M         manifest           canonical JSON (signed)
 12+M    4         wrapped_dek_len
