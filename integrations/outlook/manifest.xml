@@ -1,0 +1,63 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<OfficeApp
+    xmlns="http://schemas.microsoft.com/office/appforoffice/1.1"
+    xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+    xmlns:bt="http://schemas.microsoft.com/office/officeappbasictypes/1.0"
+    xsi:type="MailApp">
+
+  <!-- Stable identity. Do not regenerate; it is what AppSource and the
+       Microsoft 365 admin center key updates against. -->
+  <Id>ee9beb3a-64a6-4656-b3f9-a8d0ad8c409c</Id>
+  <Version>0.1.0</Version>
+  <ProviderName>Oversight Protocol</ProviderName>
+  <DefaultLocale>en-US</DefaultLocale>
+
+  <DisplayName DefaultValue="Oversight Inspector"/>
+  <Description DefaultValue="Verify Oversight .sealed attachments and decrypt them in the task pane. Private keys stay in memory; no content is sent to a server."/>
+
+  <IconUrl DefaultValue="https://oversightprotocol.dev/integrations/outlook/assets/icon-64.png"/>
+  <HighResolutionIconUrl DefaultValue="https://oversightprotocol.dev/integrations/outlook/assets/icon-128.png"/>
+
+  <SupportUrl DefaultValue="https://oversightprotocol.dev/about.html"/>
+
+  <AppDomains>
+    <AppDomain>https://oversightprotocol.dev</AppDomain>
+  </AppDomains>
+
+  <Hosts>
+    <Host Name="Mailbox"/>
+  </Hosts>
+
+  <Requirements>
+    <Sets>
+      <!-- 1.5 covers getAttachmentContentAsync across all modern Outlook
+           clients. Bump if we adopt newer item APIs. -->
+      <Set Name="Mailbox" MinVersion="1.5"/>
+    </Sets>
+  </Requirements>
+
+  <FormSettings>
+    <Form xsi:type="ItemRead">
+      <DesktopSettings>
+        <SourceLocation DefaultValue="https://oversightprotocol.dev/integrations/outlook/taskpane.html"/>
+        <RequestedHeight>360</RequestedHeight>
+      </DesktopSettings>
+    </Form>
+  </FormSettings>
+
+  <!-- ReadItem is the minimum scope to enumerate attachments and call
+       getAttachmentContentAsync. Do not request ReadWriteMailbox until the
+       seal-from-Outlook v2 flow lands; over-permissioning slows tenant
+       admin reviews and weakens the privacy story. -->
+  <Permissions>ReadItem</Permissions>
+
+  <!-- Activate on read-mode messages that have any attachment. The task
+       pane filters down to .sealed (and .oversight) attachments client-side
+       so messages with unrelated attachments don't get a misleading button. -->
+  <Rule xsi:type="RuleCollection" Mode="Or">
+    <Rule xsi:type="ItemHasAttachment"/>
+  </Rule>
+
+  <DisableEntityHighlighting>false</DisableEntityHighlighting>
+
+</OfficeApp>
