@@ -110,6 +110,24 @@ The attribute command runs a 5-phase pipeline:
 4. **Multi-layer Bayesian fusion** combining all evidence into ranked candidates
 5. **Content fingerprint comparison** (winnowing + sentence hashing) as a last resort when all watermarks are stripped
 
+## What's new in v0.4.10
+
+**Hardware-keys foundation.** `oversight-crypto` now exposes a
+`KeyProvider` trait that abstracts the recipient-side ECDH so a
+hardware-backed token (YubiKey / Nitrokey / OnlyKey via PIV) can plug
+into the open path without changing call sites. `FileKeyProvider`
+ships as the X25519 default. The hardware-track suite
+`OSGT-HW-P256-v1` is fully implemented in software:
+`wrap_dek_for_recipient_p256` + `WrappedDekP256` +
+`SoftwareP256KeyProvider` (NIST P-256 ECDH, RustCrypto's `p256`
+crate). `oversight-container` recognizes the new suite id (`3`) so
+sealed files for hardware recipients ride the existing 1-byte header
+dispatch without a layout change. The `PivKeyProvider` (PKCS#11)
+implementation is the next bounded follow-up; the trait and software
+reference let it ship without touching seal-side or container code.
+Full crate test count is 21/21 in `oversight-crypto` and 12/12 in
+`oversight-container`. Public API additive; v0.4.9 callers unchanged.
+
 ## What's new in v0.4.9
 
 **Browser inspector decrypts hybrid (post-quantum) sealed files.**

@@ -1,6 +1,11 @@
 # Oversight CHANGELOG
 
-## Unreleased
+## v0.4.10 - 2026-05-07 Hardware-keys foundation: KeyProvider trait + OSGT-HW-P256-v1
+
+This release lands the abstraction and pure-Rust reference path that the
+upcoming `PivKeyProvider` (PKCS#11 against YubiKey / Nitrokey / OnlyKey)
+plugs into. Public API is purely additive; all existing v0.4.9 callers
+keep working unchanged.
 
 - **`oversight-container`: `OSGT-HW-P256-v1` recognized by the binary
   container (2026-05-07).** Added `SUITE_HW_P256_V1_ID = 3` and extended
