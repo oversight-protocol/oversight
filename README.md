@@ -110,6 +110,39 @@ The attribute command runs a 5-phase pipeline:
 4. **Multi-layer Bayesian fusion** combining all evidence into ranked candidates
 5. **Content fingerprint comparison** (winnowing + sentence hashing) as a last resort when all watermarks are stripped
 
+## Coming in v0.4.9 (unreleased; on `main`)
+
+**Browser inspector decrypts hybrid (post-quantum) sealed files.**
+The viewer at <https://oversightprotocol.dev/viewer/> now decrypts
+both `OSGT-CLASSIC-v1` and `OSGT-HYBRID-v1` files end-to-end. The
+hybrid path uses WebCrypto for X25519 + HKDF-SHA256, a vendored
+`@noble/ciphers` for XChaCha20-Poly1305, and a vendored
+`@noble/post-quantum` ML-KEM-768 for the post-quantum half of the
+KEM. The KEK is bound X-wing-style over both shared secrets and
+both ephemeral inputs (`ss_x || ss_pq || eph_pub || mlkem_ct`),
+matching `oversight_core.crypto.hybrid_wrap_dek` byte for byte.
+All vendored libraries ship with rewritten relative imports so the
+inspector remains fully offline-capable. Try it with the new
+"Load hybrid tutorial identity" button against `tutorial-hybrid.sealed`.
+
+**Rust registry v1 conformance.** `oversight-rust/oversight-registry`
+now exposes the full read-only and beacon surface
+(`/.well-known/oversight-registry`, `/evidence/{file_id}`,
+`/tlog/head|proof|range`, `/p/{token_id}.png`, `/r/{token_id}`,
+`/v/{token_id}`, `/candidates/semantic`) and ships strict CORS
+restricted to the public browser-inspector origins with GET and
+OPTIONS only. The Axum server now passes `tests/test_registry_conformance.py`
+(33/33) in live-URL mode. `oversight-rust/oversight-manifest` learned
+to verify Python-signed v0.4.5+ manifests by carrying
+`canonical_content_hash` and `l3_policy` in the signed model, with
+a fallback path for older manifests that lack those fields.
+
+**Format watermark round-trip fixes.** `oversight-rust/oversight-formats`
+text embedding now keeps L2 trailing-whitespace marks at physical
+line endings after L1 zero-width insertion, and image LSB embedding
+no longer overwrites earlier payload bits via duplicate pixel
+slots. Workspace test suite is green again.
+
 ## What's new in v0.4.8
 
 **Mobile-build portability and security bump.** Patch release. The
