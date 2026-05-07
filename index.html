@@ -276,6 +276,21 @@
     </p>
     <p>
       <span class="badge badge-green">Shipped</span>
+      <strong>Outlook add-in scaffold</strong> landed 2026-05-07 as the first ecosystem
+      integration. <a href="integrations/outlook/manifest.xml">Office 1.1 MailApp manifest</a>,
+      task pane HTML/JS, and icons are hosted at
+      <a href="integrations/outlook/"><code>/integrations/outlook/</code></a>. The task pane
+      imports the public viewer's <code>parseSealed</code>, <code>verifyManifestSignature</code>,
+      and <code>decryptSealed</code> directly from the same origin, so there is no second
+      crypto stack to audit. Both classic and hybrid (post-quantum) suites decrypt inside the
+      task pane; the manifest requests <code>ReadItem</code> only and is ready for sideload
+      against a Microsoft 365 dev tenant. Architecture decision record:
+      <a href="https://github.com/oversight-protocol/oversight/blob/main/docs/OUTLOOK.md"><code>docs/OUTLOOK.md</code></a>.
+      Visual design pass and a real tenant load-test are the remaining work; the protocol-side
+      surface is complete.
+    </p>
+    <p>
+      <span class="badge badge-green">Shipped</span>
       <strong>v0.4.7</strong> hardened registry federation. <code>docs/spec/registry-v1.md</code>
       is now pinned against the reference implementation with the canonicalization algorithm,
       the uniform error envelope, the full endpoint list including normative beacon paths,

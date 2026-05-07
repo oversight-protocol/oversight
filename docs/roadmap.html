@@ -73,6 +73,11 @@
         <strong>Outlook add-in first</strong> for the first ecosystem integration. Drive,
         Box, SharePoint, and Teams plugins are deferred until there is a maintainer or design
         partner paying for them.
+        <span class="badge badge-green">Scaffold landed 2026-05-07</span> Office 1.1 MailApp
+        manifest, task-pane HTML/JS, and icons are hosted under
+        <code>integrations/outlook/</code>; the task pane imports the public viewer's
+        parse / verify / decrypt directly so there is no second crypto stack. Tenant
+        pilot and visual design pass remain pending.
       </li>
       <li>
         <strong>SIEM integration before SOC 2.</strong> Splunk HEC, Microsoft Sentinel, and
@@ -107,7 +112,9 @@
       <li>Browser inspector and drag-drop share workflow.
         <span class="badge badge-green">Inspector + classic decrypt shipped</span>
         <span class="badge badge-green">Hybrid (post-quantum) decrypt shipped 2026-05-03</span></li>
-      <li>Outlook add-in. <span class="badge badge-blue">Next</span></li>
+      <li>Outlook add-in.
+        <span class="badge badge-green">Scaffold landed 2026-05-07</span>
+        <span class="badge badge-blue">Tenant pilot pending</span></li>
       <li>One regulated-industry design-partner deployment.</li>
       <li>SOC 2 Type 1 scoping, in parallel with the design partner.</li>
       <li>Public launch. Not before steps 3 and 4.</li>
@@ -129,12 +136,26 @@
 
     <h2 id="near-term">Near-term</h2>
     <ul>
-      <li>Hybrid (post-quantum) decrypt in the browser. ML-KEM-768 decapsulation alongside X25519; candidate path is a wasm build of <code>liboqs</code>.</li>
-      <li>Outlook add-in. First ecosystem integration; the inspector already covers the open path.</li>
-      <li>Hardware <code>KeyProvider</code> integration in Rust (YubiKey, Nitrokey, OnlyKey) with <code>docs/HARDWARE_KEYS.md</code> as the vendor-neutral setup guide.
+      <li>Hybrid (post-quantum) decrypt in the browser.
+        <span class="badge badge-green">Shipped 2026-05-03</span> Vendored
+        <code>@noble/post-quantum</code> ML-KEM-768 alongside the existing
+        WebCrypto X25519 + HKDF-SHA256 path. KEK bound X-wing-style over both
+        shared secrets and both ephemeral inputs.</li>
+      <li>Outlook add-in.
+        <span class="badge badge-green">Scaffold shipped 2026-05-07</span>
+        <span class="badge badge-blue">Tenant pilot pending</span>
+        Office 1.1 MailApp manifest, task pane HTML/JS, and icons live at
+        <code>integrations/outlook/</code> on the site. Task pane imports the
+        public viewer's <code>parseSealed</code> / <code>verifyManifestSignature</code>
+        / <code>decryptSealed</code>.</li>
+      <li>Hardware <code>KeyProvider</code> integration in Rust (YubiKey, Nitrokey, OnlyKey)
+        with <a href="hardware-keys.html"><code>docs/HARDWARE_KEYS.md</code></a> as the
+        vendor-neutral setup guide.
         <span class="badge badge-green">Trait + OSGT-HW-P256-v1 shipped 2026-05-07</span>
         <span class="badge badge-blue">PivKeyProvider next</span></li>
-      <li>Rust Axum registry: integration testing and migration tooling; the conformance harness is the acceptance gate.</li>
+      <li>Rust Axum registry: integration testing and migration tooling; the
+        conformance harness is the acceptance gate.
+        <span class="badge badge-green">v1 conformance 33/33 shipped 2026-05-03</span></li>
       <li>arXiv preprint (~15 pages, <code>cs.CR</code>).</li>
       <li>Threat model document in the repository (companion to <code>docs/security.md</code>).</li>
     </ul>
