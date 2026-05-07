@@ -245,6 +245,20 @@
     </p>
     <p>
       <span class="badge badge-green">Shipped</span>
+      <strong>v0.4.9</strong> (on <code>main</code>): the browser inspector now decrypts hybrid
+      (post-quantum) sealed files end-to-end, alongside the classic suite that already worked.
+      ML-KEM-768 lands via a vendored copy of <code>@noble/post-quantum</code>; X25519 and
+      HKDF-SHA256 stay on WebCrypto; XChaCha20-Poly1305 stays on the vendored
+      <code>@noble/ciphers</code>. The KEK binds both shared secrets and both ephemeral
+      inputs X-wing-style so an attacker has to break X25519 <em>and</em> ML-KEM-768 to
+      recover content. The Rust registry under <code>oversight-rust/oversight-registry</code>
+      now passes the v1 conformance harness (33/33), with a strict CORS surface on
+      GET/OPTIONS for the public inspector origins. Try the hybrid path with the
+      "Load hybrid tutorial identity" button at <a href="viewer/">/viewer/</a>.
+      Writeup: <a href="blog/rust-registry-hybrid-watermark-progress.html">Development Log: Rust Registry v1, Hybrid Viewer Samples, and Watermark Round Trips</a>.
+    </p>
+    <p>
+      <span class="badge badge-green">Shipped</span>
       <strong>v0.4.7</strong> hardened registry federation. <code>docs/spec/registry-v1.md</code>
       is now pinned against the reference implementation with the canonicalization algorithm,
       the uniform error envelope, the full endpoint list including normative beacon paths,
