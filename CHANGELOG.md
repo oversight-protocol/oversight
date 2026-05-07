@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- **Outlook add-in scaffold landed (2026-05-07).** New `integrations/outlook/`
+  with the Office add-in 1.1 manifest (`MailApp`, read-mode task pane,
+  `ReadItem` only), task-pane HTML, and JS that imports the public viewer's
+  `parseSealed`, `verifyManifestSignature`, and `decryptSealed` directly
+  from `oversightprotocol.dev/viewer/...` rather than reimplementing crypto.
+  Decrypts both classic and hybrid suites. Architecture decision recorded in
+  `docs/OUTLOOK.md`. Status: scaffold; not yet load-tested in an Outlook
+  tenant. Icons (64/128 px) still pending.
 - **Browser inspector: hybrid (post-quantum) decrypt shipped (2026-05-03).**
   The viewer at `oversight-protocol.github.io/oversight/viewer/` now decrypts
   `OSGT-HYBRID-v1` sealed files end-to-end, in addition to the

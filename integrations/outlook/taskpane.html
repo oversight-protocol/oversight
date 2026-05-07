@@ -1,0 +1,66 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="X-UA-Compatible" content="IE=edge">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Oversight Inspector</title>
+
+  <!-- Office.js: required by Outlook to host the task pane. Loaded from
+       Microsoft's CDN per Microsoft's guidance; it is not vendored. -->
+  <script src="https://appsforoffice.microsoft.com/lib/1.1/hosted/office.js"></script>
+
+  <link rel="stylesheet" href="https://oversightprotocol.dev/css/style.css">
+  <style>
+    body { font-family: 'Inter', system-ui, sans-serif; padding: 12px; font-size: 14px; }
+    h1 { font-size: 16px; margin: 0 0 8px; }
+    .badge { display:inline-block; padding:2px 8px; border-radius:4px; font-size:12px; font-weight:600; }
+    .badge.ok   { background: rgba(60,180,100,0.15);  color:#2ea870; }
+    .badge.bad  { background: rgba(220,80,80,0.15);   color:#cc4444; }
+    .badge.wait { background: rgba(150,150,150,0.15); color:#666; }
+    .row { margin: 8px 0; }
+    .kv { display:grid; grid-template-columns: 110px 1fr; gap:4px 8px; font-size:12px; }
+    .kv span:nth-child(odd) { color:#666; }
+    .kv code { word-break: break-all; }
+    button { padding:6px 12px; border-radius:4px; border:1px solid #ccc; background:#fafafa; cursor:pointer; }
+    button:disabled { opacity:0.5; cursor:not-allowed; }
+    textarea { width:100%; min-height:60px; font-family: monospace; font-size:11px; }
+    .err { color:#cc4444; font-size:12px; margin-top:8px; }
+    .info { color:#666; font-size:12px; margin-top:8px; }
+  </style>
+</head>
+<body>
+  <h1>Oversight Inspector</h1>
+
+  <div id="status" class="badge wait">waiting for message</div>
+
+  <div class="row" id="attachment-row" style="display:none;">
+    <label for="attachment-select"><strong>Sealed attachment:</strong></label>
+    <select id="attachment-select" style="width:100%;margin-top:4px;"></select>
+    <button id="btn-load" style="margin-top:6px;">Load + verify</button>
+  </div>
+
+  <div class="row" id="manifest-row" style="display:none;">
+    <h2 style="font-size:14px;margin-top:12px;">Manifest</h2>
+    <div class="kv" id="manifest-kv"></div>
+  </div>
+
+  <div class="row" id="decrypt-row" style="display:none;">
+    <h2 style="font-size:14px;margin-top:12px;">Decrypt</h2>
+    <p class="info">Paste your <code>identity.json</code>. Private keys stay in this task pane and are never sent to a server.</p>
+    <textarea id="identity-text" placeholder='{"x25519_priv":"...","x25519_pub":"..."} (hybrid identities also include mlkem_priv/mlkem_pub)'></textarea>
+    <div style="margin-top:6px;">
+      <button id="btn-decrypt">Decrypt</button>
+    </div>
+    <div id="plaintext-out" style="display:none;margin-top:8px;">
+      <strong>Plaintext SHA-256 matches manifest:</strong>
+      <pre id="plaintext-preview" style="max-height:140px;overflow:auto;font-size:11px;background:#f6f6f6;padding:6px;border-radius:4px;"></pre>
+      <button id="btn-download">Download plaintext</button>
+    </div>
+  </div>
+
+  <div id="error" class="err" style="display:none;"></div>
+
+  <script type="module" src="taskpane.js"></script>
+</body>
+</html>

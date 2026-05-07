@@ -46,7 +46,8 @@ threat-model honesty, not on a calendar date.
 2. Browser inspector and drag-drop share workflow. **Shipped** -
    inspector, classic-suite decrypt, and hybrid (post-quantum) decrypt
    are all live.
-3. Outlook add-in. **Next up.**
+3. Outlook add-in. **Scaffold landed 2026-05-07** (`integrations/outlook/`,
+   `docs/OUTLOOK.md`); pilot in an Outlook tenant pending.
 4. One regulated-industry design-partner deployment.
 5. SOC 2 Type 1 scoping in parallel with the design partner.
 6. Broad public launch (HN, Reddit, conferences). Not before the inspector,
@@ -190,10 +191,17 @@ place.
 
 ### Outlook add-in
 
-Microsoft add-in manifest, JS SDK surface, hosted manifest URL, and a
-pilot with one tenant. The manifest advertises seal and open against
-the user's configured registry URL. Browser inspector code already
-handles the open path; the add-in is primarily integration and UX work.
+**Scaffold landed 2026-05-07.** `integrations/outlook/` ships the Office
+add-in 1.1 manifest (`MailApp`, read-mode task pane, `ReadItem` only),
+the task-pane HTML, and JS that imports the public viewer's parse /
+verify / decrypt directly from `oversightprotocol.dev/viewer/`. No
+second crypto stack. Both classic and hybrid suites decrypt. Decision
+record at `docs/OUTLOOK.md`.
+
+Remaining for a real pilot: 64 px / 128 px icons in
+`integrations/outlook/assets/`, an Outlook tenant load-test, and the
+manifest hosting deploy under `oversightprotocol.dev/integrations/outlook/`.
+Sealing-from-Outlook (compose mode) is intentionally deferred to v2.
 
 ### Hardware `KeyProvider` in Rust
 
