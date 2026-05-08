@@ -245,6 +245,21 @@
     </p>
     <p>
       <span class="badge badge-green">Shipped</span>
+      <strong>v0.4.11</strong> closes the <code>OSGT-HW-P256-v1</code> surface across
+      every reference implementation. The Python core, the Rust workspace, and the public
+      browser inspector now all decrypt hardware-suite sealed files. The
+      <a href="viewer/">/viewer/</a> page accepts a hardware tutorial identity via a new
+      "Load hardware P-256 tutorial identity" button; the underlying ECDH runs against a
+      vendored, pinned copy of <code>@noble/curves</code> NIST P-256, with imports
+      rewritten to relative file paths so the inspector remains fully offline-capable.
+      Every layer of the protocol now ships every suite (classic, hybrid, hardware P-256);
+      the only piece deferred to a follow-up is the <code>PivKeyProvider</code> against
+      PKCS#11 and the matching <code>--recipient-hw</code> CLI flag.
+      Release notes:
+      <a href="https://github.com/oversight-protocol/oversight/releases/tag/v0.4.11">v0.4.11 on GitHub</a>.
+    </p>
+    <p>
+      <span class="badge badge-green">Shipped</span>
       <strong>v0.4.10</strong> lands the hardware-keys foundation in Rust. <code>oversight-crypto</code>
       now exposes a <code>KeyProvider</code> trait that abstracts the recipient-side ECDH so a
       hardware-backed token (YubiKey / Nitrokey / OnlyKey via PIV) can plug into the open path
