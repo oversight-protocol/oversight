@@ -5,7 +5,7 @@
 // telemetry.
 
 const MAGIC = new Uint8Array([0x4f, 0x53, 0x47, 0x54, 0x01, 0x00]); // "OSGT\x01\x00"
-const SUITE_NAMES = { 1: 'OSGT-CLASSIC-v1', 2: 'OSGT-HYBRID-v1' };
+const SUITE_NAMES = { 1: 'OSGT-CLASSIC-v1', 2: 'OSGT-HYBRID-v1', 3: 'OSGT-HW-P256-v1' };
 
 // ---- container parsing -----------------------------------------------------
 
@@ -240,14 +240,17 @@ async function hkdfSha256(ikm, info, length) {
   return new Uint8Array(bits);
 }
 
-export async function decryptSealed(parsed, identity, xchachaAead, mlKem768) {
+export async function decryptSealed(parsed, identity, xchachaAead, mlKem768, p256) {
   if (parsed.suiteId === 2) {
     return decryptSealedHybrid(parsed, identity, xchachaAead, mlKem768);
+  }
+  if (parsed.suiteId === 3) {
+    return decryptSealedHwP256(parsed, identity, xchachaAead, p256);
   }
   if (parsed.suiteId !== 1) {
     throw new Error(
       `unsupported suite_id ${parsed.suiteId} (${parsed.suiteName}); `
-      + 'in-browser decrypt supports classic (1) and hybrid (2).'
+      + 'in-browser decrypt supports classic (1), hybrid (2), and hardware P-256 (3).'
     );
   }
   if (!parsed.wrappedDek || !parsed.wrappedDek.ephemeral_pub || !parsed.wrappedDek.nonce || !parsed.wrappedDek.wrapped_dek) {
@@ -456,6 +459,124 @@ export async function decryptSealedHybrid(parsed, identity, xchachaAead, mlKem76
   }
 
   // Outer ciphertext: identical construction to classic.
+  const aeadNonce = parsed.aeadNonce;
+  if (aeadNonce.length !== 24) {
+    throw new Error(`aead_nonce must be 24 bytes, got ${aeadNonce.length}`);
+  }
+  if (!parsed._ciphertextFull || parsed.ciphertextLen === 0) {
+    throw new Error('sealed file has no ciphertext');
+  }
+  const contentAad = new TextEncoder().encode(parsed.manifest.content_hash);
+  const outerAead = xchachaAead(dek, aeadNonce, contentAad);
+  let plaintext;
+  try {
+    plaintext = outerAead.decrypt(parsed._ciphertextFull);
+  } catch (e) {
+    throw new Error('ciphertext decrypt failed (tag mismatch). The manifest may have been tampered with.');
+  }
+
+  const actual = await sha256Hex(plaintext);
+  if (actual.toLowerCase() !== String(parsed.manifest.content_hash || '').toLowerCase()) {
+    throw new Error('plaintext hash does not match manifest.content_hash after decryption');
+  }
+
+  return plaintext;
+}
+
+// ---- Hardware-backed P-256 decrypt (OSGT-HW-P256-v1) -----------------------
+// Matches oversight_core/crypto.py:unwrap_dek_p256 and
+// oversight-rust/oversight-crypto::unwrap_dek_with_provider_p256.
+//
+//   ss = ECDH(recipient_p256_priv, wrapped.ephemeral_pub)   (vendored noble/curves)
+//   KEK = HKDF-SHA256(ss, info=b"oversight-hw-p256-v1-dek-wrap", L=32)
+//   DEK = XChaCha20-Poly1305.decrypt(KEK, wrapped.nonce, wrapped_dek, aad=b"oversight-hw-p256-dek")
+//
+// `p256` is the noble/curves P-256 module. The recipient identity must include
+// `p256_priv_scalar` (32-byte raw scalar, hex) and `p256_pub` (65-byte SEC1
+// uncompressed, hex).
+
+export async function decryptSealedHwP256(parsed, identity, xchachaAead, p256) {
+  if (parsed.suiteId !== 3) {
+    throw new Error(`decryptSealedHwP256 called with non-HW-P256 suite_id=${parsed.suiteId}`);
+  }
+  if (!p256 || typeof p256.getSharedSecret !== 'function') {
+    throw new Error(
+      'hardware P-256 decrypt requires the noble/curves p256 module. '
+      + "Import { p256 } from './vendor/noble-curves-nist-2.2.0.js' "
+      + 'and pass it as the 5th argument to decryptSealed.'
+    );
+  }
+  const w = parsed.wrappedDek || {};
+  for (const k of ['ephemeral_pub', 'nonce', 'wrapped_dek']) {
+    if (!w[k]) {
+      throw new Error(`HW-P256 wrapped_dek envelope missing field: ${k}`);
+    }
+  }
+  if (!identity || typeof identity !== 'object') {
+    throw new Error('identity must be an object with p256_priv_scalar and p256_pub');
+  }
+  if (!identity.p256_priv_scalar || !identity.p256_pub) {
+    throw new Error('HW-P256 identity is missing p256_priv_scalar or p256_pub');
+  }
+
+  const privScalar = hexToBytes(identity.p256_priv_scalar);
+  const selfPub = hexToBytes(identity.p256_pub);
+  if (privScalar.length !== 32) {
+    throw new Error(`p256 priv scalar must be 32 bytes (64 hex chars), got ${privScalar.length}`);
+  }
+  if (selfPub.length !== 65) {
+    throw new Error(`p256 pub must be 65 bytes SEC1 uncompressed (130 hex chars), got ${selfPub.length}`);
+  }
+
+  // Cross-check the identity matches the manifest's recipient.
+  const recip = parsed.manifest.recipient || {};
+  if (recip.p256_pub && recip.p256_pub.toLowerCase() !== identity.p256_pub.toLowerCase()) {
+    throw new Error(
+      'identity p256_pub does not match manifest.recipient.p256_pub; '
+      + 'this hardware sealed file was not addressed to the supplied identity.'
+    );
+  }
+
+  const ephPub = hexToBytes(w.ephemeral_pub);
+  if (ephPub.length !== 65) {
+    throw new Error(`P-256 ephemeral_pub must be 65 bytes (SEC1 uncompressed), got ${ephPub.length}`);
+  }
+  const wrappedNonce = hexToBytes(w.nonce);
+  const wrappedDek = hexToBytes(w.wrapped_dek);
+
+  // ECDH. noble's getSharedSecret returns the full point; we want only the
+  // X coordinate (32 bytes), which is the standard ECDH shared-secret value
+  // matching what Python's cryptography.exchange(ec.ECDH(), peer) returns.
+  let raw;
+  try {
+    raw = p256.getSharedSecret(privScalar, ephPub, false); // false = uncompressed (65 bytes)
+  } catch (e) {
+    throw new Error('P-256 ECDH failed: ' + e.message);
+  }
+  let sharedX;
+  if (raw.length === 65) {
+    sharedX = raw.subarray(1, 33);          // 0x04 || X || Y -> X
+  } else if (raw.length === 33) {
+    sharedX = raw.subarray(1);              // 0x02/0x03 || X -> X
+  } else if (raw.length === 32) {
+    sharedX = raw;                          // already X-only
+  } else {
+    throw new Error(`unexpected P-256 shared secret length: ${raw.length}`);
+  }
+
+  const kek = await hkdfSha256(sharedX, new TextEncoder().encode('oversight-hw-p256-v1-dek-wrap'), 32);
+
+  const kekAead = xchachaAead(kek, wrappedNonce, new TextEncoder().encode('oversight-hw-p256-dek'));
+  let dek;
+  try {
+    dek = kekAead.decrypt(wrappedDek);
+  } catch (e) {
+    throw new Error(
+      'Hardware P-256 DEK unwrap failed. The supplied private scalar does not match '
+      + 'the recipient declared in the manifest.'
+    );
+  }
+
   const aeadNonce = parsed.aeadNonce;
   if (aeadNonce.length !== 24) {
     throw new Error(`aead_nonce must be 24 bytes, got ${aeadNonce.length}`);

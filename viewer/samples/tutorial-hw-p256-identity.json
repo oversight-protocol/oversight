@@ -1,0 +1,9 @@
+{
+  "recipient_id": "tutorial@oversightprotocol.dev",
+  "p256_priv_scalar": "4e62a94164d52c502ef568b55a500c6cb9edde09e9be2fa751df9bf75f649095",
+  "p256_priv_pkcs8": "308187020100301306072a8648ce3d020106082a8648ce3d030107046d306b02010104204e62a94164d52c502ef568b55a500c6cb9edde09e9be2fa751df9bf75f649095a144034200049f18b26b9e0b7e60ab8c2ed4ed2f79f7a82630a499cff586d6c6ac24b322a0f377d26b4dd46ac70df5d6594b7038d184ea5c2a0b8a94f37aa9a6b2605509a2ed",
+  "p256_pub": "049f18b26b9e0b7e60ab8c2ed4ed2f79f7a82630a499cff586d6c6ac24b322a0f377d26b4dd46ac70df5d6594b7038d184ea5c2a0b8a94f37aa9a6b2605509a2ed",
+  "ed25519_priv": "public-tutorial-key-does-not-sign",
+  "ed25519_pub": "public-tutorial-key-does-not-sign",
+  "_note": "PUBLIC TUTORIAL KEY for OSGT-HW-P256-v1. Demo-only."
+}

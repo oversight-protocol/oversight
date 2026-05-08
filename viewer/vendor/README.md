@@ -57,6 +57,38 @@ Imported by `ml-kem.js` for the NTT primitives (`FFTCore`, `reverseBits`).
 - source: `https://cdn.jsdelivr.net/npm/@noble/curves@2.2.0/abstract/fft.js/+esm`
 - sha256: `4741238cc8180d5115fdde4238ff6eefa16db67e714d3855a508d95e4f1c8221`
 
+## Hardware-backed P-256 suite
+
+The viewer's hardware-backed decrypt path uses NIST P-256 ECDH for
+PIV-compatible recipients (`OSGT-HW-P256-v1`). Implementation comes from
+[@noble/curves](https://github.com/paulmillr/noble-curves). The `nist.js`
+bundle imports from sibling `@noble/hashes` submodules; those are vendored
+alongside it and the imports in `noble-curves-nist-2.2.0.js` have been
+rewritten to relative file paths so the viewer remains fully offline-capable.
+
+### noble-curves-nist-2.2.0.js
+
+Exports `p256`, `p384`, `p521`. The viewer uses `p256.getSharedSecret`.
+
+- source: `https://cdn.jsdelivr.net/npm/@noble/curves@2.2.0/nist.js/+esm`
+- sha256 (after rewriting three import paths to relative): `ec4eb11ea9a3fb34a6bb936cbb09f5e645ef6ab8e7730c9e2f0292731f5b4300`
+
+### noble-hashes-sha2-2.2.0.js
+
+Imported by `nist.js` for SHA-2 family digests.
+
+- source: `https://cdn.jsdelivr.net/npm/@noble/hashes@2.2.0/sha2.js/+esm`
+- sha256: `69b6cb0360b250d7428db58a777403f9888c6710c914baffff20a0dbc4b35dc0`
+
+### noble-hashes-hmac-2.2.0.js
+
+Imported by `nist.js` for HMAC (used in deterministic ECDSA signing
+internals; ECDH itself does not depend on HMAC, but the curve module
+pulls it in).
+
+- source: `https://cdn.jsdelivr.net/npm/@noble/hashes@2.2.0/hmac.js/+esm`
+- sha256: `aaa27c9c5cd9d41b06958c11016878e7d3f054b39787d14d80bf2e09670560ec`
+
 ## License
 
 All packages (`@noble/ciphers`, `@noble/post-quantum`, `@noble/hashes`,
