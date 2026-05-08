@@ -2,6 +2,23 @@
 
 ## Unreleased
 
+- **`oversight_core.crypto`: Python parity for `OSGT-HW-P256-v1`
+  (2026-05-08).** New `wrap_dek_for_recipient_p256` and `unwrap_dek_p256`
+  mirror the Rust reference byte-for-byte: same HKDF info string
+  (`"oversight-hw-p256-v1-dek-wrap"`), same AEAD AAD
+  (`"oversight-hw-p256-dek"`), same SEC1 uncompressed (65 byte) wire
+  format for the ephemeral public key, same wrapped envelope JSON shape
+  including the explicit `"suite"` field. `unwrap_dek_p256` accepts
+  either an `EllipticCurvePrivateKey`, a PKCS#8-encoded private key, or
+  a raw integer scalar so a future PIV / PKCS#11 binding has a portable
+  on-ramp. `oversight_core.container` now recognizes `suite_id = 3` and
+  maps it to `OSGT-HW-P256-v1` in `SUITE_ID_TO_NAME`. New
+  `tests/test_hw_p256.py` (10 tests) covers the round trip across all
+  three private-key input forms, the on-wire envelope shape against
+  `SPEC.md` &sect; 5.2, and the negative paths (wrong recipient, wrong
+  ephemeral key length, missing fields, AAD binding so a classic
+  envelope's bytes do not silently decrypt through the hardware path).
+
 - **`oversight-container`: end-to-end seal/open for `OSGT-HW-P256-v1`
   (2026-05-07).** New `seal_hw_p256` mirrors `seal` but consumes a P-256
   SEC1 uncompressed recipient public key and writes a container with

@@ -57,6 +57,10 @@ except Exception:
 
 SUITE_CLASSIC_V1 = "OSGT-CLASSIC-v1"   # X25519 + Ed25519 + XChaCha20-Poly1305
 SUITE_HYBRID_V1 = "OSGT-HYBRID-v1"     # + ML-KEM-768 + ML-DSA-65
+SUITE_HW_P256_V1 = "OSGT-HW-P256-v1"   # P-256 ECDH for PIV-compatible hardware tokens
+
+# P-256 SEC1 uncompressed public key length: 0x04 || X || Y, 65 bytes total.
+P256_PUBLIC_KEY_LEN = 65
 
 XCHACHA_NONCE_LEN = crypto_aead_xchacha20poly1305_ietf_NPUBBYTES  # 24
 XCHACHA_KEY_LEN = crypto_aead_xchacha20poly1305_ietf_KEYBYTES     # 32
@@ -175,6 +179,137 @@ def unwrap_dek(wrapped: dict, recipient_x25519_priv: bytes) -> bytes:
         bytes.fromhex(wrapped["nonce"]),
         bytes.fromhex(wrapped["wrapped_dek"]),
         aad=b"oversight-dek",
+    )
+
+
+# ---------- key agreement: hardware-backed P-256 (OSGT-HW-P256-v1) ----------
+
+def wrap_dek_for_recipient_p256(
+    dek: bytes,
+    recipient_p256_pub_sec1: bytes,
+) -> dict:
+    """
+    Encrypt a DEK for a P-256 recipient (typically backed by a PIV-compatible
+    hardware token: YubiKey, Nitrokey, OnlyKey).
+
+    `recipient_p256_pub_sec1` is the recipient's NIST P-256 public key in
+    SEC1 uncompressed encoding (65 bytes, ``0x04 || X || Y``).
+
+    Mirrors `oversight-rust/oversight-crypto::wrap_dek_for_recipient_p256`
+    byte-for-byte: same HKDF info ``oversight-hw-p256-v1-dek-wrap``, same
+    AEAD AAD ``oversight-hw-p256-dek``. Output JSON shape matches
+    `WrappedDekP256::to_json_hex` so a sealed file produced by either
+    implementation opens with either implementation.
+
+    Returns a dict with: suite, ephemeral_pub, nonce, wrapped_dek (all hex).
+    """
+    if len(recipient_p256_pub_sec1) != P256_PUBLIC_KEY_LEN:
+        raise ValueError(
+            f"recipient_p256_pub_sec1 must be {P256_PUBLIC_KEY_LEN} bytes "
+            f"(SEC1 uncompressed), got {len(recipient_p256_pub_sec1)}"
+        )
+
+    # Lazy import: cryptography always exposes ec, but keeping the symbol out
+    # of module top-level matches the existing pattern for hybrid PQ imports.
+    from cryptography.hazmat.primitives.asymmetric import ec as _ec
+
+    peer = _ec.EllipticCurvePublicKey.from_encoded_point(
+        _ec.SECP256R1(), recipient_p256_pub_sec1
+    )
+
+    eph = _ec.generate_private_key(_ec.SECP256R1())
+    shared = eph.exchange(_ec.ECDH(), peer)
+
+    kek = HKDF(
+        algorithm=hashes.SHA256(),
+        length=32,
+        salt=None,
+        info=b"oversight-hw-p256-v1-dek-wrap",
+    ).derive(shared)
+
+    nonce, wrapped = aead_encrypt(kek, dek, aad=b"oversight-hw-p256-dek")
+
+    eph_pub_bytes = eph.public_key().public_bytes(
+        encoding=serialization.Encoding.X962,
+        format=serialization.PublicFormat.UncompressedPoint,
+    )
+    if len(eph_pub_bytes) != P256_PUBLIC_KEY_LEN:
+        # Should be impossible with SECP256R1 + UncompressedPoint, but guard
+        # explicitly so any future curve change surfaces as a clear error
+        # rather than producing a malformed envelope.
+        raise RuntimeError(
+            f"P-256 ephemeral pub must be {P256_PUBLIC_KEY_LEN} bytes, got {len(eph_pub_bytes)}"
+        )
+
+    return {
+        "suite": SUITE_HW_P256_V1,
+        "ephemeral_pub": eph_pub_bytes.hex(),
+        "nonce": nonce.hex(),
+        "wrapped_dek": wrapped.hex(),
+    }
+
+
+def unwrap_dek_p256(wrapped: dict, recipient_p256_priv_pkcs8_or_int) -> bytes:
+    """
+    Recover the DEK for an `OSGT-HW-P256-v1` envelope using the recipient's
+    P-256 private key.
+
+    `recipient_p256_priv_pkcs8_or_int` accepts either:
+      - an `EllipticCurvePrivateKey` (e.g., loaded from PKCS#11 or generated
+        in-process for tests), or
+      - bytes containing a PKCS#8-encoded P-256 private key, or
+      - an integer in the range [1, n-1] (for raw scalar import).
+
+    Mirrors `oversight-rust/oversight-crypto::unwrap_dek_with_provider_p256`.
+    """
+    from cryptography.hazmat.primitives.asymmetric import ec as _ec
+
+    for required in ("ephemeral_pub", "nonce", "wrapped_dek"):
+        if required not in wrapped:
+            raise ValueError(f"hw-p256 envelope missing field: {required}")
+
+    eph_pub_bytes = bytes.fromhex(wrapped["ephemeral_pub"])
+    if len(eph_pub_bytes) != P256_PUBLIC_KEY_LEN:
+        raise ValueError(
+            f"ephemeral_pub must be {P256_PUBLIC_KEY_LEN} bytes "
+            f"(SEC1 uncompressed), got {len(eph_pub_bytes)}"
+        )
+
+    # Coerce the recipient private key into an EllipticCurvePrivateKey.
+    if isinstance(recipient_p256_priv_pkcs8_or_int, _ec.EllipticCurvePrivateKey):
+        sk = recipient_p256_priv_pkcs8_or_int
+    elif isinstance(recipient_p256_priv_pkcs8_or_int, (bytes, bytearray)):
+        sk = serialization.load_der_private_key(
+            bytes(recipient_p256_priv_pkcs8_or_int), password=None
+        )
+        if not isinstance(sk, _ec.EllipticCurvePrivateKey):
+            raise ValueError("PKCS#8 key is not an EllipticCurvePrivateKey")
+    elif isinstance(recipient_p256_priv_pkcs8_or_int, int):
+        sk = _ec.derive_private_key(
+            recipient_p256_priv_pkcs8_or_int, _ec.SECP256R1()
+        )
+    else:
+        raise TypeError(
+            "recipient private key must be EllipticCurvePrivateKey, PKCS#8 bytes, or int scalar"
+        )
+
+    eph_pub = _ec.EllipticCurvePublicKey.from_encoded_point(
+        _ec.SECP256R1(), eph_pub_bytes
+    )
+    shared = sk.exchange(_ec.ECDH(), eph_pub)
+
+    kek = HKDF(
+        algorithm=hashes.SHA256(),
+        length=32,
+        salt=None,
+        info=b"oversight-hw-p256-v1-dek-wrap",
+    ).derive(shared)
+
+    return aead_decrypt(
+        kek,
+        bytes.fromhex(wrapped["nonce"]),
+        bytes.fromhex(wrapped["wrapped_dek"]),
+        aad=b"oversight-hw-p256-dek",
     )
 
 

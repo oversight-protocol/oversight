@@ -8,7 +8,7 @@ The `.sealed` container format. Binary layout:
     ------  --------  ---------------------------------------
     0       6         magic: b"OSGT\\x01\\x00"
     6       1         format_version (=1)
-    7       1         suite_id (1=CLASSIC_V1, 2=HYBRID_V1)
+    7       1         suite_id (1=CLASSIC_V1, 2=HYBRID_V1, 3=HW_P256_V1)
     8       4         manifest_len (u32 big-endian)
     12      M         manifest (canonical JSON, signed)
     12+M    4         wrapped_dek_len (u32 BE)
@@ -41,9 +41,11 @@ from .manifest import Manifest
 MAGIC = b"OSGT\x01\x00"
 SUITE_CLASSIC_V1_ID = 1
 SUITE_HYBRID_V1_ID = 2
+SUITE_HW_P256_V1_ID = 3
 SUITE_ID_TO_NAME = {
     SUITE_CLASSIC_V1_ID: crypto.SUITE_CLASSIC_V1,
     SUITE_HYBRID_V1_ID: crypto.SUITE_HYBRID_V1,
+    SUITE_HW_P256_V1_ID: crypto.SUITE_HW_P256_V1,
 }
 
 
