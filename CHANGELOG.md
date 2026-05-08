@@ -1,6 +1,13 @@
 # Oversight CHANGELOG
 
-## Unreleased
+## v0.4.11 - 2026-05-08 Hardware-keys completion: Python parity, browser support, end-to-end seal
+
+The `OSGT-HW-P256-v1` suite is now implemented end-to-end across all
+three reference implementations: Rust core, Python core, and the
+public browser inspector. Every layer of the protocol ships every
+suite. The only piece deferred to a follow-up is the `PivKeyProvider`
+(PKCS#11 binding to actual hardware tokens) and the matching
+`--recipient-hw` CLI flag.
 
 - **`oversight_core.crypto`: Python parity for `OSGT-HW-P256-v1`
   (2026-05-08).** New `wrap_dek_for_recipient_p256` and `unwrap_dek_p256`

@@ -110,6 +110,25 @@ The attribute command runs a 5-phase pipeline:
 4. **Multi-layer Bayesian fusion** combining all evidence into ranked candidates
 5. **Content fingerprint comparison** (winnowing + sentence hashing) as a last resort when all watermarks are stripped
 
+## What's new in v0.4.11
+
+**Hardware-keys completion across every reference implementation.** v0.4.11
+finishes what v0.4.10 started. The `OSGT-HW-P256-v1` suite now ships
+end-to-end in `oversight_core.crypto` (Python: `wrap_dek_for_recipient_p256`,
+`unwrap_dek_p256` accepting `EllipticCurvePrivateKey`, PKCS#8 bytes, or raw
+integer scalars), in `oversight-container` (`seal_hw_p256` +
+`open_sealed_with_provider` polymorphic dispatch on `suite_id`), in the
+manifest schema (`Recipient.p256_pub` optional field, deserialization
+back-compatible), and in the public browser inspector at
+<https://oversightprotocol.dev/viewer/> via vendored `@noble/curves` P-256
+ECDH. Every existing classic and hybrid call site is unchanged. The
+container's existing rule that the unsigned `suite_id` header must match
+the signed `manifest.suite` covers cross-suite-mixing attacks for free.
+A new `tools/gen_hw_p256_sample.py` produces the public viewer's
+`tutorial-hw-p256.sealed` fixture without needing `oqs` or hardware. The
+last piece of the hardware story, `PivKeyProvider` against PKCS#11, is
+the next bounded follow-up.
+
 ## What's new in v0.4.10
 
 **Hardware-keys foundation.** `oversight-crypto` now exposes a
