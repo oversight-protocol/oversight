@@ -1,0 +1,122 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Shipping From the Road: The Boring Work That Makes Oversight Real | Oversight Protocol</title>
+  <meta name="description" content="A short development note on shipping Oversight mobile and live registry configuration while traveling, using a remote desktop session to keep the work tied to the right local files and operational context.">
+  <meta name="author" content="Zion Boggan">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="../css/style.css">
+</head>
+<body>
+
+<nav class="site-nav">
+  <div class="nav-inner">
+    <a href="../" class="nav-brand"><span>Oversight</span> Protocol</a>
+    <ul class="nav-links">
+      <li><a href="../">Home</a></li>
+      <li><a href="../demo/">Demo</a></li>
+      <li><a href="../viewer/">Inspect</a></li>
+      <li><a href="../docs/">Docs</a></li>
+      <li><a href="../research/">Research</a></li>
+      <li><a href="../blog/" class="active">Blog</a></li>
+      <li><a href="../about.html">About</a></li>
+    </ul>
+  </div>
+</nav>
+
+<main>
+  <div class="container">
+
+    <div class="blog-post-header">
+      <h1>Shipping From the Road: The Boring Work That Makes Oversight Real</h1>
+      <div class="blog-post-meta">2026-05-11 &middot; Zion Boggan &middot; ~3 min read</div>
+    </div>
+
+    <div class="blog-content">
+
+      <p>
+        I have been traveling while pushing the last round of Oversight work. That
+        detail matters less as a lifestyle note than as an engineering note. A
+        protocol project like this has public code, public docs, public site copy,
+        private local handoff notes, signing context, release history, and deployment
+        assumptions that should not get mixed together casually. When I am away from
+        the desk, the safest way to keep moving is not to recreate that context on a
+        laptop. It is to remote into the machine that already has the relevant files,
+        local-only notes, and repo state, then make the change from there.
+      </p>
+
+      <p>
+        The recent work has been the kind of progress that does not look dramatic
+        in a screenshot. The mobile verifier moved to a real release cut: receipt
+        copying on result screens, tighter file-picker behavior, the Rust core pinned
+        to the newer tag, CI checks added before packaging, and a tagged mobile build
+        that produced green iOS and Android release workflows. On the protocol repo,
+        the live registry configuration grew up from a sketch into something an
+        operator can actually reason about: placeholder-only environment config,
+        a Compose live profile, Caddy routing for registry and beacon hostnames,
+        optional operator-token protection for write-side routes, and a deployment
+        guide that says what is public, what is private, and what must be checked
+        before DNS points at it.
+      </p>
+
+      <p>
+        That is not the glamorous part of Oversight. The glamorous part is the
+        cryptographic story: sealed containers, signed manifests, hybrid key
+        establishment, transparent logs, hardware-backed recipients, watermark
+        survival. But the protocol does not become real because the primitives are
+        interesting. It becomes real when the surrounding work is boring enough to
+        trust: tags point at the right commits, CI fails for the right reasons, public
+        docs do not overclaim, deployment files contain placeholders instead of
+        secrets, and the release notes tell a future operator exactly what changed.
+      </p>
+
+      <p>
+        Working through a remote desktop session also forces a useful discipline.
+        I am looking at the same working trees that the project has been using, not
+        a half-reconstructed travel copy. If there is a local handoff file, I can read
+        it. If a public site post depends on the current release language, I can check
+        the canonical notes first. If a change is going to GitHub, I can run the same
+        opsec checks before anything leaves the machine. The point is not that remote
+        access is special. The point is that continuity is part of security.
+      </p>
+
+      <p>
+        The live registry work is a good example. It would be easy to publish a Caddy
+        file that routes the happy path and call it done. The better version is more
+        explicit: one domain for registry reads and operator APIs, separate beacon
+        hostnames for passive callbacks, a DNS bridge secret, an optional operator
+        token for registration and attribution posts, and a conformance command that
+        still works when the operator token is enabled. None of that changes the
+        cryptographic protocol. It changes whether the reference deployment is a
+        toy or a thing someone can run without guessing.
+      </p>
+
+      <p>
+        I want the public record to include this kind of work because it is easy to
+        undercount. A release is not just the feature that got merged. It is the
+        docs, the route map, the CI run, the failed check that got fixed, the public
+        wording that stayed honest, and the private notes that did not leak into the
+        repo. Oversight is still pre-audit and still moving fast, but the project is
+        maturing in the places that matter: the edges where an idea becomes something
+        another person can build, verify, deploy, and inspect.
+      </p>
+
+    </div>
+  </div>
+</main>
+
+<footer class="site-footer">
+  <div class="container">
+    <p>Oversight Protocol &copy; 2026 Zion Boggan. Apache 2.0 License.</p>
+    <p style="color:var(--text-muted);font-size:13px;">Co-authored with Claude Opus 4.6 and 4.7 (Anthropic).</p>
+    <p><a href="https://github.com/oversight-protocol/oversight">GitHub</a></p>
+  </div>
+</footer>
+
+<script src="../js/nav.js" defer></script>
+</body>
+</html>
