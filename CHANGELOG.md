@@ -1,5 +1,23 @@
 # Oversight CHANGELOG
 
+## Unreleased
+
+- **Live registry deployment config.** `docker-compose.yml` now has a `live`
+  Caddy profile with public TLS routing for the registry, beacon, OCSP-style,
+  and license-style hostnames. `Caddyfile` covers the full registry v1
+  read/evidence/tlog surface plus beacon routes, with all hostnames coming
+  from environment variables. `.env.example` documents public-safe defaults
+  and leaves secrets blank.
+- **Registry operator token.** The Python reference registry can now require
+  `OVERSIGHT_OPERATOR_TOKEN` for `POST /register` and `POST /attribute`.
+  The token is optional so local development and unauthenticated conformance
+  runs keep working, but production operators can protect write-side APIs
+  without changing route shapes. The conformance harness sends the token as
+  a bearer header when `OVERSIGHT_OPERATOR_TOKEN` is set.
+- **Deployment docs.** Added `docs/REGISTRY_DEPLOYMENT.md` covering the live
+  Compose/Caddy flow, route map, token headers, DNS bridge secret, and local
+  versus live conformance commands.
+
 ## v0.4.11 - 2026-05-08 Hardware-keys completion: Python parity, browser support, end-to-end seal
 
 The `OSGT-HW-P256-v1` suite is now implemented end-to-end across all

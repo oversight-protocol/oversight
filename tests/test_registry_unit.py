@@ -187,6 +187,32 @@ def t4_evidence_bundle_can_attach_tlog_proofs():
     print("  [PASS] evidence bundles attach tlog inclusion proofs for events")
 
 
+def t5_operator_token_gates_write_side_apis_when_configured():
+    original_token = registry_server.OPERATOR_TOKEN
+    try:
+        registry_server.OPERATOR_TOKEN = ""
+        registry_server._require_operator_auth(_fake_request("203.0.113.10"))
+
+        registry_server.OPERATOR_TOKEN = "operator-secret"
+        registry_server._require_operator_auth(
+            _fake_request("203.0.113.10", {"authorization": "Bearer operator-secret"})
+        )
+        registry_server._require_operator_auth(
+            _fake_request("203.0.113.10", {"x-oversight-operator-token": "operator-secret"})
+        )
+        try:
+            registry_server._require_operator_auth(
+                _fake_request("203.0.113.10", {"authorization": "Bearer wrong"})
+            )
+        except HTTPException as exc:
+            assert exc.status_code == 401
+        else:
+            raise AssertionError("wrong operator token should be rejected")
+    finally:
+        registry_server.OPERATOR_TOKEN = original_token
+    print("  [PASS] optional operator token gates write-side APIs")
+
+
 def main():
     print("=" * 60)
     print("  registry.server - focused unit tests")
@@ -195,8 +221,9 @@ def main():
     t2_register_rejects_unsigned_sidecar_mismatch()
     t3_dns_event_requires_secret_for_non_loopback()
     t4_evidence_bundle_can_attach_tlog_proofs()
+    t5_operator_token_gates_write_side_apis_when_configured()
     print()
-    print("  ALL TESTS PASSED - 4/4")
+    print("  ALL TESTS PASSED - 5/5")
 
 
 if __name__ == "__main__":

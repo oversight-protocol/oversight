@@ -1,41 +1,52 @@
 services:
   oversight-registry:
     build: .
-    image: oversight-registry:0.1.0
+    image: oversight-registry:0.4.11
     container_name: oversight-registry
     restart: unless-stopped
     ports:
-      # bind to loopback only by default — put a reverse proxy (Caddy/nginx/Traefik)
-      # in front to terminate TLS and reach the public beacon domain
-      - "127.0.0.1:8765:8765"
+      # Loopback by default. Use the live Caddy profile for public TLS.
+      - "${OVERSIGHT_REGISTRY_BIND:-127.0.0.1}:8765:8765"
     volumes:
       - oversight_data:/data
     environment:
       OVERSIGHT_DB: /data/oversight-registry.sqlite
+      OVERSIGHT_DATA: /data
+      OVERSIGHT_CORS_ORIGINS: ${OVERSIGHT_CORS_ORIGINS:-https://oversightprotocol.dev,https://www.oversightprotocol.dev,https://oversight-protocol.github.io}
+      OVERSIGHT_DNS_EVENT_SECRET: ${OVERSIGHT_DNS_EVENT_SECRET:-}
+      OVERSIGHT_OPERATOR_TOKEN: ${OVERSIGHT_OPERATOR_TOKEN:-}
+      OVERSIGHT_JURISDICTION: ${OVERSIGHT_JURISDICTION:-GLOBAL}
+      OVERSIGHT_REKOR_ENABLED: ${OVERSIGHT_REKOR_ENABLED:-0}
+      OVERSIGHT_REKOR_URL: ${OVERSIGHT_REKOR_URL:-https://log2025-1.rekor.sigstore.dev}
+      TRUSTED_PROXY: ${TRUSTED_PROXY:-1}
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8765/health').read()"]
       interval: 30s
       timeout: 5s
       retries: 3
 
-  # Optional: Caddy TLS terminator + beacon domain fronting.
-  # Uncomment once you have a real domain + DNS pointing at this host.
-  #
-  # caddy:
-  #   image: caddy:2-alpine
-  #   container_name: oversight-caddy
-  #   restart: unless-stopped
-  #   ports:
-  #     - "80:80"
-  #     - "443:443"
-  #   volumes:
-  #     - ./Caddyfile:/etc/caddy/Caddyfile:ro
-  #     - caddy_data:/data
-  #     - caddy_config:/config
-  #   depends_on:
-  #     - oversight-registry
+  caddy:
+    image: caddy:2-alpine
+    container_name: oversight-caddy
+    restart: unless-stopped
+    profiles: ["live"]
+    ports:
+      - "${OVERSIGHT_HTTP_BIND:-0.0.0.0}:80:80"
+      - "${OVERSIGHT_HTTPS_BIND:-0.0.0.0}:443:443"
+    environment:
+      OVERSIGHT_REGISTRY_DOMAIN: ${OVERSIGHT_REGISTRY_DOMAIN:-registry.oversightprotocol.dev}
+      OVERSIGHT_BEACON_DOMAIN: ${OVERSIGHT_BEACON_DOMAIN:-b.oversightprotocol.dev}
+      OVERSIGHT_OCSP_DOMAIN: ${OVERSIGHT_OCSP_DOMAIN:-ocsp.oversightprotocol.dev}
+      OVERSIGHT_LICENSE_DOMAIN: ${OVERSIGHT_LICENSE_DOMAIN:-lic.oversightprotocol.dev}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      oversight-registry:
+        condition: service_healthy
 
 volumes:
   oversight_data:
-  # caddy_data:
-  # caddy_config:
+  caddy_data:
+  caddy_config:

@@ -17,6 +17,7 @@ COPY registry/ ./registry/
 # Persistent data volume
 VOLUME ["/data"]
 ENV OVERSIGHT_DB=/data/oversight-registry.sqlite
+ENV OVERSIGHT_DATA=/data
 
 EXPOSE 8765
 

@@ -48,6 +48,25 @@ pip install ".[formats]"
 pip install ".[all]"
 ```
 
+## Live Registry Deployment
+
+The reference registry ships with a public-safe Compose/Caddy deployment path.
+Start `oversight-registry` on loopback for local operation, then enable the
+`live` profile when DNS is ready and Caddy should terminate TLS for the
+registry, beacon, OCSP-style, and license-style hostnames.
+
+```bash
+cp .env.example .env
+docker compose up -d oversight-registry
+docker compose --profile live up -d
+```
+
+Set `OVERSIGHT_DNS_EVENT_SECRET` and `OVERSIGHT_OPERATOR_TOKEN` in `.env`
+before exposing a public host. The operator token protects `POST /register`
+and `POST /attribute`; the DNS secret authenticates `/dns_event` bridge
+callbacks. Full route map and validation commands are in
+[`docs/REGISTRY_DEPLOYMENT.md`](docs/REGISTRY_DEPLOYMENT.md).
+
 ## Quick start
 
 ```bash

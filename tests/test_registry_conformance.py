@@ -64,15 +64,30 @@ class Client:
     """Thin wrapper that presents the same get/post surface over a
     FastAPI TestClient or a live httpx.Client."""
 
-    def __init__(self, impl, base_url: str = ""):
+    def __init__(self, impl, base_url: str = "", default_headers: Optional[dict[str, str]] = None):
         self._impl = impl
         self._base = base_url.rstrip("/")
+        self._headers = default_headers or {}
+
+    def _merge_headers(self, kwargs: dict[str, Any]) -> dict[str, Any]:
+        if not self._headers:
+            return kwargs
+        merged = dict(self._headers)
+        merged.update(kwargs.pop("headers", {}) or {})
+        return {**kwargs, "headers": merged}
 
     def get(self, path: str, **kwargs):
+        kwargs = self._merge_headers(kwargs)
         return self._impl.get(self._base + path, **kwargs) if self._base else self._impl.get(path, **kwargs)
 
     def post(self, path: str, **kwargs):
+        kwargs = self._merge_headers(kwargs)
         return self._impl.post(self._base + path, **kwargs) if self._base else self._impl.post(path, **kwargs)
+
+
+def operator_headers() -> dict[str, str]:
+    token = os.environ.get("OVERSIGHT_OPERATOR_TOKEN", "").strip()
+    return {"Authorization": f"Bearer {token}"} if token else {}
 
 
 def build_in_process_client():
@@ -102,12 +117,12 @@ def build_in_process_client():
     server.TLOG = TransparencyLog(server.TLOG_DIR, signing_key_hex=server.IDENTITY["ed25519_priv"])
 
     tc = TestClient(server.app)
-    return Client(tc), tmp, server.IDENTITY["ed25519_pub"]
+    return Client(tc, default_headers=operator_headers()), tmp, server.IDENTITY["ed25519_pub"]
 
 
 def build_live_client(url: str):
     import httpx
-    return Client(httpx.Client(timeout=15.0), base_url=url), None, None
+    return Client(httpx.Client(timeout=15.0), base_url=url, default_headers=operator_headers()), None, None
 
 
 # ---- Manifest fixture --------------------------------------------------------

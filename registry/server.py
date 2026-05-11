@@ -49,6 +49,7 @@ IDENTITY_PATH = DATA_DIR / "registry-identity.json"
 TRUSTED_PROXY = bool(int(os.environ.get("TRUSTED_PROXY", "0")))
 # When TRUSTED_PROXY=1, honor X-Forwarded-For for rate limiting.
 DNS_EVENT_SECRET = os.environ.get("OVERSIGHT_DNS_EVENT_SECRET", "")
+OPERATOR_TOKEN = os.environ.get("OVERSIGHT_OPERATOR_TOKEN", "").strip()
 
 # Rekor v2 wiring (v0.5 Session B). Off by default so existing tests do not
 # generate live network traffic. Set OVERSIGHT_REKOR_ENABLED=1 to opt in.
@@ -399,6 +400,26 @@ def _rate_limit(request: Request):
         raise HTTPException(429, "rate limit exceeded")
 
 
+def _bearer_or_header_token(request: Request, header_name: str) -> str:
+    supplied = request.headers.get(header_name, "")
+    if supplied:
+        return supplied.strip()
+    auth = request.headers.get("authorization", "")
+    if auth.lower().startswith("bearer "):
+        return auth[7:].strip()
+    return ""
+
+
+def _require_operator_auth(request: Request):
+    """Require the optional operator bearer token for write-side APIs."""
+    if not OPERATOR_TOKEN:
+        return
+    supplied = _bearer_or_header_token(request, "x-oversight-operator-token")
+    if hmac.compare_digest(supplied, OPERATOR_TOKEN):
+        return
+    raise HTTPException(401, "operator authentication required")
+
+
 def _is_loopback_host(host: Optional[str]) -> bool:
     if not host:
         return False
@@ -411,11 +432,7 @@ def _is_loopback_host(host: Optional[str]) -> bool:
 def _verify_dns_event_auth(request: Request):
     """Authenticate DNS bridge callbacks before trusting client_ip in the body."""
     if DNS_EVENT_SECRET:
-        supplied = request.headers.get("x-oversight-dns-secret", "")
-        if not supplied:
-            auth = request.headers.get("authorization", "")
-            if auth.lower().startswith("bearer "):
-                supplied = auth[7:].strip()
+        supplied = _bearer_or_header_token(request, "x-oversight-dns-secret")
         if hmac.compare_digest(supplied, DNS_EVENT_SECRET):
             return
         raise HTTPException(401, "invalid DNS event secret")
@@ -480,6 +497,7 @@ def register(req: RegistrationRequest, request: Request):
         another issuer's attribution record.
       - A per-client rate limit applies.
     """
+    _require_operator_auth(request)
     _rate_limit(request)
 
     m = req.manifest
@@ -636,7 +654,8 @@ async def beacon_license(token_id: str, request: Request):
 
 
 @app.post("/attribute")
-def attribute(q: AttributionQuery):
+def attribute(q: AttributionQuery, request: Request):
+    _require_operator_auth(request)
     with db() as con:
         row = None
         if q.token_id:

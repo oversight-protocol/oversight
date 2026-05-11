@@ -1,53 +1,107 @@
-# OVERSIGHT registry — production Caddy config.
+# Oversight registry, production Caddy config.
 #
-# Replace `oversightprotocol.dev` with the beacon domain you actually own
-# (the one whose hostname is baked into the beacon URLs you mint).
+# Set the hostnames in .env before starting the live Compose profile:
+#   OVERSIGHT_REGISTRY_DOMAIN=registry.example.org
+#   OVERSIGHT_BEACON_DOMAIN=b.example.org
+#   OVERSIGHT_OCSP_DOMAIN=ocsp.example.org
+#   OVERSIGHT_LICENSE_DOMAIN=lic.example.org
 #
-# Beacons look like:
-#   https://b.oversightprotocol.dev/p/{token}.png
-#   https://ocsp.oversightprotocol.dev/r/{token}
-#   https://lic.oversightprotocol.dev/v/{token}
-#
-# The simplest setup uses a single apex + path-based routing. Caddy auto-provisions
-# TLS via Let's Encrypt.
+# Caddy terminates TLS. The registry service stays private on the Compose
+# network and is reachable from the host only on the configured loopback bind.
 
-oversightprotocol.dev {
-    encode gzip
+(registry_upstream) {
+    reverse_proxy oversight-registry:8765
+}
 
-    # Attribution / evidence API — lock down with auth in production.
-    handle /register {
-        reverse_proxy oversight-registry:8765
+(security_headers) {
+    header {
+        X-Content-Type-Options nosniff
+        Referrer-Policy no-referrer
+        Permissions-Policy interest-cohort=()
     }
-    handle /attribute {
-        reverse_proxy oversight-registry:8765
-    }
-    handle /evidence/* {
-        reverse_proxy oversight-registry:8765
-    }
-    handle /health {
-        reverse_proxy oversight-registry:8765
-    }
+}
 
-    # Public beacon endpoints — open to the internet by design.
-    handle /p/* {
-        reverse_proxy oversight-registry:8765
-    }
-    handle /r/* {
-        reverse_proxy oversight-registry:8765
-    }
-    handle /v/* {
-        reverse_proxy oversight-registry:8765
+{$OVERSIGHT_REGISTRY_DOMAIN:registry.oversightprotocol.dev} {
+    encode zstd gzip
+    import security_headers
+
+    @registry_read path /health /.well-known/oversight-registry /evidence/* /tlog/* /candidates/semantic
+    handle @registry_read {
+        import registry_upstream
     }
 
-    # Everything else -> 404
+    @registry_write path /register /attribute
+    handle @registry_write {
+        import registry_upstream
+    }
+
+    @dns_bridge path /dns_event
+    handle @dns_bridge {
+        import registry_upstream
+    }
+
     handle {
         respond 404
     }
 
     log {
-        output file /data/access.log {
+        output file /data/registry-access.log {
             roll_size 100mb
             roll_keep 10
         }
+    }
+}
+
+{$OVERSIGHT_BEACON_DOMAIN:b.oversightprotocol.dev} {
+    encode zstd gzip
+    import security_headers
+
+    handle /p/* {
+        import registry_upstream
+    }
+
+    handle {
+        respond 404
+    }
+
+    log {
+        output file /data/beacon-access.log {
+            roll_size 100mb
+            roll_keep 10
+        }
+    }
+}
+
+{$OVERSIGHT_OCSP_DOMAIN:ocsp.oversightprotocol.dev} {
+    encode zstd gzip
+    import security_headers
+
+    handle /r/* {
+        import registry_upstream
+    }
+
+    handle /ocsp/r/* {
+        import registry_upstream
+    }
+
+    handle {
+        respond 404
+    }
+}
+
+{$OVERSIGHT_LICENSE_DOMAIN:lic.oversightprotocol.dev} {
+    encode zstd gzip
+    import security_headers
+
+    handle /v/* {
+        import registry_upstream
+    }
+
+    handle /lic/v/* {
+        import registry_upstream
+    }
+
+    handle {
+        respond 404
     }
 }
