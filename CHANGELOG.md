@@ -14,6 +14,11 @@
   runs keep working, but production operators can protect write-side APIs
   without changing route shapes. The conformance harness sends the token as
   a bearer header when `OVERSIGHT_OPERATOR_TOKEN` is set.
+- **Rust registry operator-token parity.** The Axum + SQLx registry now reads
+  `OVERSIGHT_OPERATOR_TOKEN` too and enforces it on `POST /register` and
+  `POST /attribute` with the same bearer/header contract as the Python
+  registry. Its DNS event route also accepts either `Authorization: Bearer`
+  or `X-Oversight-DNS-Secret`, matching the live deployment guide.
 - **Deployment docs.** Added `docs/REGISTRY_DEPLOYMENT.md` covering the live
   Compose/Caddy flow, route map, token headers, DNS bridge secret, and local
   versus live conformance commands.

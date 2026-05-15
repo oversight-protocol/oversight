@@ -7,6 +7,7 @@ use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use crate::auth::{bearer_or_header_token, constant_time_eq};
 use crate::db;
 use crate::error::{RegistryError, Result};
 use crate::models::*;
@@ -102,12 +103,10 @@ pub async fn dns_event(
 
 fn verify_dns_event_auth(state: &AppState, headers: &HeaderMap, addr: &SocketAddr) -> Result<()> {
     if let Some(secret) = state.dns_event_secret.as_deref() {
-        let supplied = headers
-            .get("x-oversight-dns-secret")
-            .and_then(|v| v.to_str().ok())
-            .unwrap_or("");
-        if constant_time_eq(supplied.as_bytes(), secret.as_bytes()) {
-            return Ok(());
+        if let Some(supplied) = bearer_or_header_token(headers, "x-oversight-dns-secret") {
+            if constant_time_eq(supplied.as_bytes(), secret.as_bytes()) {
+                return Ok(());
+            }
         }
         return Err(RegistryError::Unauthorized(
             "invalid dns event authentication".into(),
@@ -121,15 +120,4 @@ fn verify_dns_event_auth(state: &AppState, headers: &HeaderMap, addr: &SocketAdd
     Err(RegistryError::BadRequest(
         "OVERSIGHT_DNS_EVENT_SECRET is required for non-loopback DNS event callbacks".into(),
     ))
-}
-
-fn constant_time_eq(a: &[u8], b: &[u8]) -> bool {
-    if a.len() != b.len() {
-        return false;
-    }
-    let mut diff = 0u8;
-    for (&x, &y) in a.iter().zip(b.iter()) {
-        diff |= x ^ y;
-    }
-    diff == 0
 }

@@ -61,6 +61,14 @@ with identical output. The cross-language conformance suite pins this.
   `issuer_ed25519_pub` as the original record. A mismatch returns
   HTTP 409.
 
+### Operator authentication
+
+Public operator deployments SHOULD protect write-side registry APIs with
+an operator token. If configured, `POST /register` and `POST /attribute`
+MUST require either `Authorization: Bearer <token>` or
+`X-Oversight-Operator-Token: <token>`. Leaving the token unset preserves
+local development and unauthenticated conformance-harness behavior.
+
 ### Error envelope
 
 Non-2xx responses MUST carry a JSON envelope:
@@ -219,9 +227,10 @@ Authentication:
 
 - Loopback clients are trusted without a secret so a DNS server on
   the same host can call without extra configuration.
-- Non-loopback callers MUST send `X-Oversight-DNS-Secret: <secret>`
-  that matches the registry's configured secret. The comparison MUST
-  be constant-time (`hmac.compare_digest` or equivalent).
+- Non-loopback callers MUST send either `Authorization: Bearer <secret>`
+  or `X-Oversight-DNS-Secret: <secret>` matching the registry's configured
+  secret. The comparison MUST be constant-time (`hmac.compare_digest` or
+  equivalent).
 - A registry that has no secret configured MUST refuse non-loopback
   callers. Silent acceptance of unauthenticated non-loopback events
   is a conformance failure.

@@ -4,7 +4,69 @@
 //! in canonical JSON form. The issuer's Ed25519 public key is embedded in the
 //! manifest itself — verification proves the issuer signed the exact bytes.
 
+use axum::http::{header, HeaderMap};
 use oversight_manifest::Manifest;
+
+use crate::error::{RegistryError, Result as RegistryResult};
+
+/// Extract a token from either `Authorization: Bearer ...` or a named header.
+pub fn bearer_or_header_token(headers: &HeaderMap, header_name: &'static str) -> Option<String> {
+    if let Some(auth) = headers
+        .get(header::AUTHORIZATION)
+        .and_then(|v| v.to_str().ok())
+    {
+        if let Some((scheme, value)) = auth.trim().split_once(' ') {
+            let token = value.trim();
+            if scheme.eq_ignore_ascii_case("bearer") && !token.is_empty() {
+                return Some(token.to_string());
+            }
+        }
+    }
+
+    headers
+        .get(header_name)
+        .and_then(|v| v.to_str().ok())
+        .map(str::trim)
+        .filter(|token| !token.is_empty())
+        .map(str::to_string)
+}
+
+/// Require an optional deployment token. Empty config preserves local/dev mode.
+pub fn require_optional_token(
+    configured_token: Option<&str>,
+    headers: &HeaderMap,
+    header_name: &'static str,
+    label: &'static str,
+) -> RegistryResult<()> {
+    let Some(expected) = configured_token else {
+        return Ok(());
+    };
+
+    let Some(supplied) = bearer_or_header_token(headers, header_name) else {
+        return Err(RegistryError::Unauthorized(format!(
+            "{label} authentication required"
+        )));
+    };
+
+    if constant_time_eq(supplied.as_bytes(), expected.as_bytes()) {
+        return Ok(());
+    }
+
+    Err(RegistryError::Unauthorized(format!(
+        "invalid {label} authentication"
+    )))
+}
+
+pub fn constant_time_eq(a: &[u8], b: &[u8]) -> bool {
+    if a.len() != b.len() {
+        return false;
+    }
+    let mut diff = 0u8;
+    for (&x, &y) in a.iter().zip(b.iter()) {
+        diff |= x ^ y;
+    }
+    diff == 0
+}
 
 /// Parse a manifest JSON value, canonicalize it, and verify the embedded
 /// Ed25519 signature.
@@ -84,6 +146,7 @@ pub fn validate_signed_artifacts(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use axum::http::HeaderValue;
 
     #[test]
     fn canonical_items_sorts_deterministically() {
@@ -100,5 +163,51 @@ mod tests {
         let a = serde_json::json!({"token_id": "abc", "kind": "dns"});
         let b = serde_json::json!({"token_id": "xyz", "kind": "dns"});
         assert_ne!(canonical_items(&[a]), canonical_items(&[b]));
+    }
+
+    #[test]
+    fn bearer_or_named_header_token_are_supported() {
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            header::AUTHORIZATION,
+            HeaderValue::from_static("Bearer operator-secret"),
+        );
+        assert_eq!(
+            bearer_or_header_token(&headers, "x-oversight-operator-token").as_deref(),
+            Some("operator-secret")
+        );
+
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            "x-oversight-operator-token",
+            HeaderValue::from_static("operator-secret"),
+        );
+        assert_eq!(
+            bearer_or_header_token(&headers, "x-oversight-operator-token").as_deref(),
+            Some("operator-secret")
+        );
+    }
+
+    #[test]
+    fn optional_token_fails_closed_when_configured() {
+        let headers = HeaderMap::new();
+        assert!(require_optional_token(None, &headers, "x-test-token", "operator").is_ok());
+        assert!(matches!(
+            require_optional_token(Some("secret"), &headers, "x-test-token", "operator"),
+            Err(RegistryError::Unauthorized(_))
+        ));
+
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            header::AUTHORIZATION,
+            HeaderValue::from_static("Bearer secret"),
+        );
+        assert!(
+            require_optional_token(Some("secret"), &headers, "x-test-token", "operator").is_ok()
+        );
+        assert!(matches!(
+            require_optional_token(Some("wrong"), &headers, "x-test-token", "operator"),
+            Err(RegistryError::Unauthorized(_))
+        ));
     }
 }

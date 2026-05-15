@@ -229,11 +229,14 @@ material.
 ### Registry in Rust
 
 `oversight-rust/oversight-registry` is scaffolded with all endpoints
-implemented under `#![forbid(unsafe_code)]`. As of 2026-05-03, the Axum
+implemented under `#![forbid(unsafe_code)]`. As of 2026-05-14, the Axum
 server passes the existing 33-check `tests/test_registry_conformance.py`
-harness in live-URL mode against the registry v1 surface. Remaining work:
-migration tooling from the Python registry, longer-running deployment tests,
-and a wire-format stability declaration before declaring v1.0 ready.
+harness in live-URL mode against the registry v1 surface with
+`OVERSIGHT_OPERATOR_TOKEN` enabled. The Rust registry now matches the Python
+reference for write-side operator-token auth and DNS bridge bearer/header
+auth. Remaining work: migration tooling from the Python registry,
+longer-running deployment tests, and a wire-format stability declaration
+before declaring v1.0 ready.
 
 ---
 

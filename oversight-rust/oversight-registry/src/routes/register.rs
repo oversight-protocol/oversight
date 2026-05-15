@@ -7,11 +7,12 @@
 //!   4. All inputs are size-validated before processing.
 
 use axum::extract::State;
+use axum::http::HeaderMap;
 use axum::Json;
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use crate::auth::{validate_signed_artifacts, verify_manifest_signature};
+use crate::auth::{require_optional_token, validate_signed_artifacts, verify_manifest_signature};
 use crate::db;
 use crate::error::{RegistryError, Result};
 use crate::models::*;
@@ -19,8 +20,16 @@ use crate::AppState;
 
 pub async fn register(
     State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
     Json(req): Json<RegistrationRequest>,
 ) -> Result<Json<RegistrationResponse>> {
+    require_optional_token(
+        state.operator_token.as_deref(),
+        &headers,
+        "x-oversight-operator-token",
+        "operator",
+    )?;
+
     // ---- Input validation ----
     let manifest = &req.manifest;
 

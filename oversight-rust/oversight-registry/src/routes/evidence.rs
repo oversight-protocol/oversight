@@ -134,6 +134,7 @@ mod tests {
             }),
             rate_limiter: RateLimiter::new(10.0, 30.0, 100),
             trusted_proxy: false,
+            operator_token: None,
             dns_event_secret: None,
             rekor_enabled: false,
             rekor_url: String::new(),

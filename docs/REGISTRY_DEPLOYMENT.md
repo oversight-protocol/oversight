@@ -2,7 +2,8 @@
 
 This is the public-safe live configuration for the reference Oversight
 registry. It keeps secrets in `.env`, keeps the registry process off the public
-host interface, and exposes TLS through Caddy.
+host interface, and exposes TLS through Caddy. The Python FastAPI registry and
+the Rust Axum registry both honor the write-side operator token described here.
 
 ## Layout
 
@@ -72,7 +73,8 @@ X-Oversight-Operator-Token: <token>
 
 Leaving `OVERSIGHT_OPERATOR_TOKEN` empty keeps the v1 conformance harness and
 local development behavior unchanged. Do not leave it empty on a public
-operator deployment.
+operator deployment. Both reference registry implementations use the same
+token contract, so live conformance commands work against either backend.
 
 DNS bridge callbacks are separate. Set `OVERSIGHT_DNS_EVENT_SECRET`; the DNS
 bridge must send either `Authorization: Bearer <secret>` or

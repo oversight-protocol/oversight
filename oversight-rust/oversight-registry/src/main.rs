@@ -69,6 +69,7 @@ pub struct AppState {
     pub identity: Option<RegistryIdentity>,
     pub rate_limiter: RateLimiter,
     pub trusted_proxy: bool,
+    pub operator_token: Option<String>,
     pub dns_event_secret: Option<String>,
     pub rekor_enabled: bool,
     pub rekor_url: String,
@@ -362,6 +363,11 @@ async fn main() -> anyhow::Result<()> {
         .map(|s| s.trim().to_string())
         .filter(|s| !s.is_empty());
 
+    let operator_token = std::env::var("OVERSIGHT_OPERATOR_TOKEN")
+        .ok()
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty());
+
     let rekor_url = std::env::var("OVERSIGHT_REKOR_URL")
         .unwrap_or_else(|_| oversight_rekor::DEFAULT_REKOR_URL.to_string());
 
@@ -395,6 +401,7 @@ async fn main() -> anyhow::Result<()> {
         identity,
         rate_limiter: RateLimiter::new(10.0, 30.0, 100_000),
         trusted_proxy,
+        operator_token,
         dns_event_secret,
         rekor_enabled,
         rekor_url,

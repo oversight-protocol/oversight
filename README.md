@@ -64,7 +64,8 @@ docker compose --profile live up -d
 Set `OVERSIGHT_DNS_EVENT_SECRET` and `OVERSIGHT_OPERATOR_TOKEN` in `.env`
 before exposing a public host. The operator token protects `POST /register`
 and `POST /attribute`; the DNS secret authenticates `/dns_event` bridge
-callbacks. Full route map and validation commands are in
+callbacks. The Python FastAPI registry and Rust Axum registry both honor
+the same bearer/header token contract. Full route map and validation commands are in
 [`docs/REGISTRY_DEPLOYMENT.md`](docs/REGISTRY_DEPLOYMENT.md).
 
 ## Quick start

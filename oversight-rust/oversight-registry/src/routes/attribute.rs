@@ -1,9 +1,11 @@
 //! POST /attribute — attribution lookup by token_id, mark_id, or perceptual_hash.
 
 use axum::extract::State;
+use axum::http::HeaderMap;
 use axum::Json;
 use std::sync::Arc;
 
+use crate::auth::require_optional_token;
 use crate::db;
 use crate::error::{RegistryError, Result};
 use crate::models::*;
@@ -11,8 +13,16 @@ use crate::AppState;
 
 pub async fn attribute(
     State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
     Json(q): Json<AttributionQuery>,
 ) -> Result<Json<AttributionResponse>> {
+    require_optional_token(
+        state.operator_token.as_deref(),
+        &headers,
+        "x-oversight-operator-token",
+        "operator",
+    )?;
+
     // Validate input sizes
     if let Some(ref id) = q.token_id {
         if id.len() > MAX_ID_LEN {
